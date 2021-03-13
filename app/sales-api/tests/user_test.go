@@ -13,7 +13,7 @@ import (
 	"github.com/ardanlabs/service/business/auth"
 	"github.com/ardanlabs/service/business/data/user"
 	"github.com/ardanlabs/service/business/tests"
-	"github.com/ardanlabs/service/foundation/web"
+	"github.com/ardanlabs/service/business/validate"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -129,25 +129,26 @@ func (ut *UserTests) postUser400(t *testing.T) {
 			}
 			t.Logf("\t%s\tTest %d:\tShould receive a status code of 400 for the response.", tests.Success, testID)
 
-			var got web.ErrorResponse
+			var got validate.ErrorResponse
 			if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to unmarshal the response to an error type : %v", tests.Failed, testID, err)
 			}
 			t.Logf("\t%s\tTest %d:\tShould be able to unmarshal the response to an error type.", tests.Success, testID)
 
-			exp := web.ErrorResponse{
-				Error: "field validation error",
-				Fields: []web.FieldError{
-					{Field: "name", Error: "name is a required field"},
-					{Field: "email", Error: "email is a required field"},
-					{Field: "roles", Error: "roles is a required field"},
-					{Field: "password", Error: "password is a required field"},
-				},
+			fields := validate.FieldErrors{
+				{Field: "name", Error: "name is a required field"},
+				{Field: "email", Error: "email is a required field"},
+				{Field: "roles", Error: "roles is a required field"},
+				{Field: "password", Error: "password is a required field"},
+			}
+			exp := validate.ErrorResponse{
+				Error:  "data validation error",
+				Fields: fields.Error(),
 			}
 
 			// We can't rely on the order of the field errors so they have to be
 			// sorted. Tell the cmp package how to sort them.
-			sorter := cmpopts.SortSlices(func(a, b web.FieldError) bool {
+			sorter := cmpopts.SortSlices(func(a, b validate.FieldError) bool {
 				return a.Field < b.Field
 			})
 
