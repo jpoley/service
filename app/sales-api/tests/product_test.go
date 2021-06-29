@@ -11,8 +11,9 @@ import (
 
 	"github.com/ardanlabs/service/app/sales-api/handlers"
 	"github.com/ardanlabs/service/business/data/product"
-	"github.com/ardanlabs/service/business/tests"
-	"github.com/ardanlabs/service/business/validate"
+	"github.com/ardanlabs/service/business/data/tests"
+	"github.com/ardanlabs/service/business/sys/metrics"
+	"github.com/ardanlabs/service/business/sys/validate"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -32,12 +33,25 @@ type ProductTests struct {
 // subtest needs a fresh instance of the application it can make it or it
 // should be its own Test* function.
 func TestProducts(t *testing.T) {
-	test := tests.NewIntegration(t)
+	test := tests.NewIntegration(
+		t,
+		tests.DBContainer{
+			Image: "postgres:13-alpine",
+			Port:  "5432",
+			Args:  []string{"-e", "POSTGRES_PASSWORD=postgres"},
+		},
+	)
 	t.Cleanup(test.Teardown)
 
 	shutdown := make(chan os.Signal, 1)
 	tests := ProductTests{
-		app:       handlers.API("develop", shutdown, test.Log, test.Auth, test.DB),
+		app: handlers.APIMux(handlers.APIMuxConfig{
+			Shutdown: shutdown,
+			Log:      test.Log,
+			Metrics:  metrics.New(),
+			Auth:     test.Auth,
+			DB:       test.DB,
+		}),
 		userToken: test.Token("admin@example.com", "gophers"),
 	}
 
@@ -270,7 +284,7 @@ func (pt *ProductTests) crudProduct(t *testing.T) {
 }
 
 // postProduct201 validates a product can be created with the endpoint.
-func (pt *ProductTests) postProduct201(t *testing.T) product.Info {
+func (pt *ProductTests) postProduct201(t *testing.T) product.Product {
 	np := product.NewProduct{
 		Name:     "Comic Books",
 		Cost:     25,
@@ -289,7 +303,7 @@ func (pt *ProductTests) postProduct201(t *testing.T) product.Info {
 	pt.app.ServeHTTP(w, r)
 
 	// This needs to be returned for other tests.
-	var got product.Info
+	var got product.Product
 
 	t.Log("Given the need to create a new product with the products endpoint.")
 	{
@@ -361,7 +375,7 @@ func (pt *ProductTests) getProduct200(t *testing.T, id string) {
 			}
 			t.Logf("\t%s\tTest : %d\tShould receive a status code of 200 for the response.", tests.Success, testID)
 
-			var got product.Info
+			var got product.Product
 			if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 				t.Fatalf("\t%s\tTest : %d\tShould be able to unmarshal the response : %v", tests.Failed, testID, err)
 			}
@@ -412,7 +426,7 @@ func (pt *ProductTests) putProduct204(t *testing.T, id string) {
 			}
 			t.Logf("\t%s\tTest %d:\tShould receive a status code of 200 for the retrieve.", tests.Success, testID)
 
-			var ru product.Info
+			var ru product.Product
 			if err := json.NewDecoder(w.Body).Decode(&ru); err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to unmarshal the response : %v", tests.Failed, testID, err)
 			}

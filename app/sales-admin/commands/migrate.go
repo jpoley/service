@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/ardanlabs/service/business/data/schema"
 	"github.com/ardanlabs/service/foundation/database"
@@ -19,7 +21,10 @@ func Migrate(cfg database.Config) error {
 	}
 	defer db.Close()
 
-	if err := schema.Migrate(db); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := schema.Migrate(ctx, db); err != nil {
 		return errors.Wrap(err, "migrate database")
 	}
 

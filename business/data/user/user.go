@@ -3,70 +3,51 @@ package user
 
 import (
 	"context"
-	"log"
 	"time"
 
-	"github.com/ardanlabs/service/business/auth"
-	"github.com/ardanlabs/service/business/validate"
+	"github.com/ardanlabs/service/business/sys/auth"
+	"github.com/ardanlabs/service/business/sys/validate"
 	"github.com/ardanlabs/service/foundation/database"
 	"github.com/dgrijalva/jwt-go/v4"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
-	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
 
-var (
-	// ErrNotFound is used when a specific User is requested but does not exist.
-	ErrNotFound = errors.New("not found")
-
-	// ErrInvalidID occurs when an ID is not in a valid form.
-	ErrInvalidID = errors.New("ID is not in its proper form")
-
-	// ErrAuthenticationFailure occurs when a user attempts to authenticate but
-	// anything goes wrong.
-	ErrAuthenticationFailure = errors.New("authentication failed")
-
-	// ErrForbidden occurs when a user tries to do something that is forbidden to them according to our access control policies.
-	ErrForbidden = errors.New("attempted action is not allowed")
-)
-
-// User manages the set of API's for user access.
-type User struct {
-	log *log.Logger
+// Store manages the set of API's for user access.
+type Store struct {
+	log *zap.SugaredLogger
 	db  *sqlx.DB
 }
 
-// New constructs a User for api access.
-func New(log *log.Logger, db *sqlx.DB) User {
-	return User{
+// NewStore constructs a user store for api access.
+func NewStore(log *zap.SugaredLogger, db *sqlx.DB) Store {
+	return Store{
 		log: log,
 		db:  db,
 	}
 }
 
 // Create inserts a new user into the database.
-func (u User) Create(ctx context.Context, traceID string, nu NewUser, now time.Time) (Info, error) {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "business.data.user.create")
-	defer span.End()
-
+func (s Store) Create(ctx context.Context, traceID string, nu NewUser, now time.Time) (User, error) {
 	if err := validate.Check(nu); err != nil {
-		return Info{}, errors.Wrap(err, "validating data")
+		return User{}, errors.Wrap(err, "validating data")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(nu.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return Info{}, errors.Wrap(err, "generating password hash")
+		return User{}, errors.Wrap(err, "generating password hash")
 	}
 
-	usr := Info{
+	usr := User{
 		ID:           validate.GenerateID(),
 		Name:         nu.Name,
 		Email:        nu.Email,
 		PasswordHash: hash,
 		Roles:        nu.Roles,
-		DateCreated:  now.UTC(),
-		DateUpdated:  now.UTC(),
+		DateCreated:  now,
+		DateUpdated:  now,
 	}
 
 	const q = `
@@ -75,30 +56,23 @@ func (u User) Create(ctx context.Context, traceID string, nu NewUser, now time.T
 	VALUES
 		(:user_id, :name, :email, :password_hash, :roles, :date_created, :date_updated)`
 
-	u.log.Printf("%s: %s: %s", traceID, "user.Create",
-		database.Log(q, usr),
-	)
-
-	if _, err := u.db.NamedExecContext(ctx, q, usr); err != nil {
-		return Info{}, errors.Wrap(err, "inserting user")
+	if err := database.NamedExecContext(ctx, s.log, s.db, traceID, q, usr); err != nil {
+		return User{}, errors.Wrap(err, "inserting user")
 	}
 
 	return usr, nil
 }
 
 // Update replaces a user document in the database.
-func (u User) Update(ctx context.Context, traceID string, claims auth.Claims, userID string, uu UpdateUser, now time.Time) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "business.data.user.update")
-	defer span.End()
-
+func (s Store) Update(ctx context.Context, traceID string, claims auth.Claims, userID string, uu UpdateUser, now time.Time) error {
 	if err := validate.CheckID(userID); err != nil {
-		return ErrInvalidID
+		return database.ErrInvalidID
 	}
 	if err := validate.Check(uu); err != nil {
 		return errors.Wrap(err, "validating data")
 	}
 
-	usr, err := u.QueryByID(ctx, traceID, claims, userID)
+	usr, err := s.QueryByID(ctx, traceID, claims, userID)
 	if err != nil {
 		return errors.Wrap(err, "updating user")
 	}
@@ -133,11 +107,7 @@ func (u User) Update(ctx context.Context, traceID string, claims auth.Claims, us
 	WHERE
 		user_id = :user_id`
 
-	u.log.Printf("%s: %s: %s", traceID, "user.Update",
-		database.Log(q, usr),
-	)
-
-	if _, err := u.db.NamedExecContext(ctx, q, usr); err != nil {
+	if err := database.NamedExecContext(ctx, s.log, s.db, traceID, q, usr); err != nil {
 		return errors.Wrapf(err, "updating user %s", usr.ID)
 	}
 
@@ -145,17 +115,14 @@ func (u User) Update(ctx context.Context, traceID string, claims auth.Claims, us
 }
 
 // Delete removes a user from the database.
-func (u User) Delete(ctx context.Context, traceID string, claims auth.Claims, userID string) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "business.data.user.delete")
-	defer span.End()
-
+func (s Store) Delete(ctx context.Context, traceID string, claims auth.Claims, userID string) error {
 	if err := validate.CheckID(userID); err != nil {
-		return ErrInvalidID
+		return database.ErrInvalidID
 	}
 
 	// If you are not an admin and looking to delete someone other than yourself.
 	if !claims.Authorized(auth.RoleAdmin) && claims.Subject != userID {
-		return ErrForbidden
+		return database.ErrForbidden
 	}
 
 	data := struct {
@@ -170,11 +137,7 @@ func (u User) Delete(ctx context.Context, traceID string, claims auth.Claims, us
 	WHERE
 		user_id = :user_id`
 
-	u.log.Printf("%s: %s: %s", traceID, "user.Delete",
-		database.Log(q, data),
-	)
-
-	if _, err := u.db.NamedExecContext(ctx, q, data); err != nil {
+	if err := database.NamedExecContext(ctx, s.log, s.db, traceID, q, data); err != nil {
 		return errors.Wrapf(err, "deleting user %s", data.UserID)
 	}
 
@@ -182,10 +145,7 @@ func (u User) Delete(ctx context.Context, traceID string, claims auth.Claims, us
 }
 
 // Query retrieves a list of existing users from the database.
-func (u User) Query(ctx context.Context, traceID string, pageNumber int, rowsPerPage int) ([]Info, error) {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "business.data.user.query")
-	defer span.End()
-
+func (s Store) Query(ctx context.Context, traceID string, pageNumber int, rowsPerPage int) ([]User, error) {
 	data := struct {
 		Offset      int `db:"offset"`
 		RowsPerPage int `db:"rows_per_page"`
@@ -203,14 +163,10 @@ func (u User) Query(ctx context.Context, traceID string, pageNumber int, rowsPer
 		user_id
 	OFFSET :offset ROWS FETCH NEXT :rows_per_page ROWS ONLY`
 
-	u.log.Printf("%s: %s: %s", traceID, "user.Query",
-		database.Log(q, data),
-	)
-
-	var users []Info
-	if err := database.NamedQuerySlice(ctx, u.db, q, data, &users); err != nil {
+	var users []User
+	if err := database.NamedQuerySlice(ctx, s.log, s.db, traceID, q, data, &users); err != nil {
 		if err == database.ErrNotFound {
-			return nil, ErrNotFound
+			return nil, database.ErrNotFound
 		}
 		return nil, errors.Wrap(err, "selecting users")
 	}
@@ -219,17 +175,14 @@ func (u User) Query(ctx context.Context, traceID string, pageNumber int, rowsPer
 }
 
 // QueryByID gets the specified user from the database.
-func (u User) QueryByID(ctx context.Context, traceID string, claims auth.Claims, userID string) (Info, error) {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "business.data.user.querybyid")
-	defer span.End()
-
+func (s Store) QueryByID(ctx context.Context, traceID string, claims auth.Claims, userID string) (User, error) {
 	if err := validate.CheckID(userID); err != nil {
-		return Info{}, ErrInvalidID
+		return User{}, database.ErrInvalidID
 	}
 
 	// If you are not an admin and looking to retrieve someone other than yourself.
 	if !claims.Authorized(auth.RoleAdmin) && claims.Subject != userID {
-		return Info{}, ErrForbidden
+		return User{}, database.ErrForbidden
 	}
 
 	data := struct {
@@ -246,29 +199,23 @@ func (u User) QueryByID(ctx context.Context, traceID string, claims auth.Claims,
 	WHERE 
 		user_id = :user_id`
 
-	u.log.Printf("%s: %s: %s", traceID, "user.QueryByID",
-		database.Log(q, data),
-	)
-
-	var usr Info
-	if err := database.NamedQueryStruct(ctx, u.db, q, data, &usr); err != nil {
+	var usr User
+	if err := database.NamedQueryStruct(ctx, s.log, s.db, traceID, q, data, &usr); err != nil {
 		if err == database.ErrNotFound {
-			return Info{}, ErrNotFound
+			return User{}, database.ErrNotFound
 		}
-		return Info{}, errors.Wrapf(err, "selecting user %q", data.UserID)
+		return User{}, errors.Wrapf(err, "selecting user %q", data.UserID)
 	}
 
 	return usr, nil
 }
 
 // QueryByEmail gets the specified user from the database by email.
-func (u User) QueryByEmail(ctx context.Context, traceID string, claims auth.Claims, email string) (Info, error) {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "business.data.user.querybyemail")
-	defer span.End()
+func (s Store) QueryByEmail(ctx context.Context, traceID string, claims auth.Claims, email string) (User, error) {
 
 	// Add Email Validate function in validate
 	// if err := validate.Email(email); err != nil {
-	// 	return Info{}, ErrInvalidEmail
+	// 	return User{}, ErrInvalidEmail
 	// }
 
 	data := struct {
@@ -285,33 +232,26 @@ func (u User) QueryByEmail(ctx context.Context, traceID string, claims auth.Clai
 	WHERE
 		email = :email`
 
-	u.log.Printf("%s: %s: %s", traceID, "user.QueryByEmail",
-		database.Log(q, data),
-	)
-
-	var usr Info
-	if err := database.NamedQueryStruct(ctx, u.db, q, data, &usr); err != nil {
+	var usr User
+	if err := database.NamedQueryStruct(ctx, s.log, s.db, traceID, q, data, &usr); err != nil {
 		if err == database.ErrNotFound {
-			return Info{}, ErrNotFound
+			return User{}, database.ErrNotFound
 		}
-		return Info{}, errors.Wrapf(err, "selecting user %q", email)
+		return User{}, errors.Wrapf(err, "selecting user %q", email)
 	}
 
 	// If you are not an admin and looking to retrieve someone other than yourself.
 	if !claims.Authorized(auth.RoleAdmin) && claims.Subject != usr.ID {
-		return Info{}, ErrForbidden
+		return User{}, database.ErrForbidden
 	}
 
 	return usr, nil
 }
 
 // Authenticate finds a user by their email and verifies their password. On
-// success it returns a Claims Info representing this user. The claims can be
+// success it returns a Claims User representing this user. The claims can be
 // used to generate a token for future authentication.
-func (u User) Authenticate(ctx context.Context, traceID string, now time.Time, email, password string) (auth.Claims, error) {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "business.data.user.authenticate")
-	defer span.End()
-
+func (s Store) Authenticate(ctx context.Context, traceID string, now time.Time, email, password string) (auth.Claims, error) {
 	data := struct {
 		Email string `db:"email"`
 	}{
@@ -326,14 +266,10 @@ func (u User) Authenticate(ctx context.Context, traceID string, now time.Time, e
 	WHERE
 		email = :email`
 
-	u.log.Printf("%s: %s: %s", traceID, "user.Authenticate",
-		database.Log(q, data),
-	)
-
-	var usr Info
-	if err := database.NamedQueryStruct(ctx, u.db, q, data, &usr); err != nil {
+	var usr User
+	if err := database.NamedQueryStruct(ctx, s.log, s.db, traceID, q, data, &usr); err != nil {
 		if err == database.ErrNotFound {
-			return auth.Claims{}, ErrNotFound
+			return auth.Claims{}, database.ErrNotFound
 		}
 		return auth.Claims{}, errors.Wrapf(err, "selecting user %q", email)
 	}
@@ -341,7 +277,7 @@ func (u User) Authenticate(ctx context.Context, traceID string, now time.Time, e
 	// Compare the provided password with the saved hash. Use the bcrypt
 	// comparison function so it is cryptographically secure.
 	if err := bcrypt.CompareHashAndPassword(usr.PasswordHash, []byte(password)); err != nil {
-		return auth.Claims{}, ErrAuthenticationFailure
+		return auth.Claims{}, database.ErrAuthenticationFailure
 	}
 
 	// If we are this far the request is valid. Create some claims for the user

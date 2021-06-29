@@ -6,64 +6,59 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/ardanlabs/service/business/auth"
 	"github.com/ardanlabs/service/business/data/product"
-	"github.com/ardanlabs/service/business/validate"
+	"github.com/ardanlabs/service/business/sys/auth"
+	"github.com/ardanlabs/service/business/sys/validate"
+	"github.com/ardanlabs/service/foundation/database"
 	"github.com/ardanlabs/service/foundation/web"
 	"github.com/pkg/errors"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type productGroup struct {
-	product product.Product
+	store product.Store
 }
 
 func (pg productGroup) query(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.productGroup.query")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
 	}
 
-	params := web.Params(r)
-	pageNumber, err := strconv.Atoi(params["page"])
+	page := web.Param(r, "page")
+	pageNumber, err := strconv.Atoi(page)
 	if err != nil {
-		return validate.NewRequestError(fmt.Errorf("invalid page format: %s", params["page"]), http.StatusBadRequest)
+		return validate.NewRequestError(fmt.Errorf("invalid page format: %s", page), http.StatusBadRequest)
 	}
-	rowsPerPage, err := strconv.Atoi(params["rows"])
+	rows := web.Param(r, "rows")
+	rowsPerPage, err := strconv.Atoi(rows)
 	if err != nil {
-		return validate.NewRequestError(fmt.Errorf("invalid rows format: %s", params["rows"]), http.StatusBadRequest)
+		return validate.NewRequestError(fmt.Errorf("invalid rows format: %s", rows), http.StatusBadRequest)
 	}
 
-	products, err := pg.product.Query(ctx, v.TraceID, pageNumber, rowsPerPage)
+	products, err := pg.store.Query(ctx, v.TraceID, pageNumber, rowsPerPage)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "unable to query for products")
 	}
 
 	return web.Respond(ctx, w, products, http.StatusOK)
 }
 
 func (pg productGroup) queryByID(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.productGroup.queryByID")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
 	}
 
-	params := web.Params(r)
-	prod, err := pg.product.QueryByID(ctx, v.TraceID, params["id"])
+	id := web.Param(r, "id")
+	prod, err := pg.store.QueryByID(ctx, v.TraceID, id)
 	if err != nil {
 		switch errors.Cause(err) {
-		case product.ErrInvalidID:
+		case database.ErrInvalidID:
 			return validate.NewRequestError(err, http.StatusBadRequest)
-		case product.ErrNotFound:
+		case database.ErrNotFound:
 			return validate.NewRequestError(err, http.StatusNotFound)
 		default:
-			return errors.Wrapf(err, "ID: %s", params["id"])
+			return errors.Wrapf(err, "ID: %s", id)
 		}
 	}
 
@@ -71,9 +66,6 @@ func (pg productGroup) queryByID(ctx context.Context, w http.ResponseWriter, r *
 }
 
 func (pg productGroup) create(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.productGroup.create")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
@@ -89,7 +81,7 @@ func (pg productGroup) create(ctx context.Context, w http.ResponseWriter, r *htt
 		return errors.Wrapf(err, "unable to decode payload")
 	}
 
-	prod, err := pg.product.Create(ctx, v.TraceID, claims, np, v.Now)
+	prod, err := pg.store.Create(ctx, v.TraceID, claims, np, v.Now)
 	if err != nil {
 		return errors.Wrapf(err, "creating new product: %+v", np)
 	}
@@ -98,9 +90,6 @@ func (pg productGroup) create(ctx context.Context, w http.ResponseWriter, r *htt
 }
 
 func (pg productGroup) update(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.productGroup.update")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
@@ -116,17 +105,17 @@ func (pg productGroup) update(ctx context.Context, w http.ResponseWriter, r *htt
 		return errors.Wrapf(err, "unable to decode payload")
 	}
 
-	params := web.Params(r)
-	if err := pg.product.Update(ctx, v.TraceID, claims, params["id"], upd, v.Now); err != nil {
+	id := web.Param(r, "id")
+	if err := pg.store.Update(ctx, v.TraceID, claims, id, upd, v.Now); err != nil {
 		switch errors.Cause(err) {
-		case product.ErrInvalidID:
+		case database.ErrInvalidID:
 			return validate.NewRequestError(err, http.StatusBadRequest)
-		case product.ErrNotFound:
+		case database.ErrNotFound:
 			return validate.NewRequestError(err, http.StatusNotFound)
-		case product.ErrForbidden:
+		case database.ErrForbidden:
 			return validate.NewRequestError(err, http.StatusForbidden)
 		default:
-			return errors.Wrapf(err, "ID: %s  User: %+v", params["id"], &upd)
+			return errors.Wrapf(err, "ID: %s  User: %+v", id, &upd)
 		}
 	}
 
@@ -134,9 +123,6 @@ func (pg productGroup) update(ctx context.Context, w http.ResponseWriter, r *htt
 }
 
 func (pg productGroup) delete(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.productGroup.delete")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
@@ -147,13 +133,13 @@ func (pg productGroup) delete(ctx context.Context, w http.ResponseWriter, r *htt
 		return errors.New("claims missing from context")
 	}
 
-	params := web.Params(r)
-	if err := pg.product.Delete(ctx, v.TraceID, claims, params["id"]); err != nil {
+	id := web.Param(r, "id")
+	if err := pg.store.Delete(ctx, v.TraceID, claims, id); err != nil {
 		switch errors.Cause(err) {
-		case product.ErrInvalidID:
+		case database.ErrInvalidID:
 			return validate.NewRequestError(err, http.StatusBadRequest)
 		default:
-			return errors.Wrapf(err, "ID: %s", params["id"])
+			return errors.Wrapf(err, "ID: %s", id)
 		}
 	}
 

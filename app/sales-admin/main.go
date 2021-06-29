@@ -4,30 +4,34 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/ardanlabs/conf"
 	"github.com/ardanlabs/service/app/sales-admin/commands"
 	"github.com/ardanlabs/service/foundation/database"
+	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 // build is the git version of this program. It is set using build flags in the makefile.
 var build = "develop"
 
 func main() {
-	log := log.New(os.Stdout, "ADMIN : ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
+
+	// Construct the application logger.
+	log := logger.New("ADMIN")
+	defer log.Sync()
 
 	if err := run(log); err != nil {
 		if errors.Cause(err) != commands.ErrHelp {
-			log.Printf("error: %s", err)
+			log.Errorw("", zap.Error(err))
 		}
 		os.Exit(1)
 	}
 }
 
-func run(log *log.Logger) error {
+func run(log *zap.SugaredLogger) error {
 
 	// =========================================================================
 	// Configuration
@@ -37,7 +41,7 @@ func run(log *log.Logger) error {
 		Args conf.Args
 		DB   struct {
 			User       string `conf:"default:postgres"`
-			Password   string `conf:"default:postgres,noprint"`
+			Password   string `conf:"default:postgres,mask"`
 			Host       string `conf:"default:0.0.0.0"`
 			Name       string `conf:"default:postgres"`
 			DisableTLS bool   `conf:"default:true"`
@@ -71,7 +75,7 @@ func run(log *log.Logger) error {
 	if err != nil {
 		return errors.Wrap(err, "generating config for output")
 	}
-	log.Printf("main: Config :\n%v\n", out)
+	log.Infow("startup", "config", out)
 
 	// =========================================================================
 	// Commands
@@ -98,9 +102,10 @@ func run(log *log.Logger) error {
 		}
 
 	case "useradd":
-		email := cfg.Args.Num(1)
-		password := cfg.Args.Num(2)
-		if err := commands.UserAdd(traceID, log, dbConfig, email, password); err != nil {
+		name := cfg.Args.Num(1)
+		email := cfg.Args.Num(2)
+		password := cfg.Args.Num(3)
+		if err := commands.UserAdd(traceID, log, dbConfig, name, email, password); err != nil {
 			return errors.Wrap(err, "adding user")
 		}
 

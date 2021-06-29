@@ -4,20 +4,21 @@ import (
 	"context"
 	"crypto/rsa"
 	"fmt"
-	"io/ioutil"
-	"log"
+	"io"
+	"os"
 	"time"
 
-	"github.com/ardanlabs/service/business/auth"
 	"github.com/ardanlabs/service/business/data/user"
+	"github.com/ardanlabs/service/business/sys/auth"
 	"github.com/ardanlabs/service/foundation/database"
 	"github.com/ardanlabs/service/foundation/keystore"
 	"github.com/dgrijalva/jwt-go/v4"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 // GenToken generates a JWT for the specified user.
-func GenToken(traceID string, log *log.Logger, cfg database.Config, id string, privateKeyFile string, algorithm string) error {
+func GenToken(traceID string, log *zap.SugaredLogger, cfg database.Config, id string, privateKeyFile string, algorithm string) error {
 	if id == "" || privateKeyFile == "" || algorithm == "" {
 		fmt.Println("help: gentoken <id> <private_key_file> <algorithm>")
 		fmt.Println("algorithm: RS256, HS256")
@@ -33,7 +34,7 @@ func GenToken(traceID string, log *log.Logger, cfg database.Config, id string, p
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	u := user.New(log, db)
+	store := user.NewStore(log, db)
 
 	// The call to retrieve a user requires an Admin role by the caller.
 	claims := auth.Claims{
@@ -43,12 +44,20 @@ func GenToken(traceID string, log *log.Logger, cfg database.Config, id string, p
 		Roles: []string{auth.RoleAdmin},
 	}
 
-	usr, err := u.QueryByID(ctx, traceID, claims, id)
+	usr, err := store.QueryByID(ctx, traceID, claims, id)
 	if err != nil {
 		return errors.Wrap(err, "retrieve user")
 	}
 
-	privatePEM, err := ioutil.ReadFile(privateKeyFile)
+	// limit PEM file size to 1 megabyte. This should be reasonable for
+	// almost any PEM file and prevents shenanigans like linking the file
+	// to /dev/random or something like that.
+	pkf, err := os.Open(privateKeyFile)
+	if err != nil {
+		return errors.Wrap(err, "opening PEM private key file")
+	}
+	defer pkf.Close()
+	privatePEM, err := io.ReadAll(io.LimitReader(pkf, 1024*1024))
 	if err != nil {
 		return errors.Wrap(err, "reading PEM private key file")
 	}

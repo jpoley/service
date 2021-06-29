@@ -61,8 +61,12 @@ func NewFS(fsys fs.FS) (*KeyStore, error) {
 		if err != nil {
 			return errors.Wrap(err, "open key file")
 		}
+		defer file.Close()
 
-		privatePEM, err := io.ReadAll(file)
+		// limit PEM file size to 1 megabyte. This should be reasonable for
+		// almost any PEM file and prevents shenanigans like linking the file
+		// to /dev/random or something like that.
+		privatePEM, err := io.ReadAll(io.LimitReader(file, 1024*1024))
 		if err != nil {
 			return errors.Wrap(err, "reading auth private key")
 		}
@@ -72,7 +76,7 @@ func NewFS(fsys fs.FS) (*KeyStore, error) {
 			return errors.Wrap(err, "parsing auth private key")
 		}
 
-		ks.store[strings.TrimRight(dirEntry.Name(), ".pem")] = privateKey
+		ks.store[strings.TrimSuffix(dirEntry.Name(), ".pem")] = privateKey
 		return nil
 	}
 

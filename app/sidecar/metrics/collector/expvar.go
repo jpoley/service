@@ -1,9 +1,10 @@
+// Package collector is a simple collector for
 package collector
 
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -44,6 +45,7 @@ func New(host string) (*Expvar, error) {
 	return &exp, nil
 }
 
+// Collect captures metrics on the host configure to this endpoint.
 func (exp *Expvar) Collect() (map[string]interface{}, error) {
 	req, err := http.NewRequest("GET", exp.host, nil)
 	if err != nil {
@@ -57,7 +59,7 @@ func (exp *Expvar) Collect() (map[string]interface{}, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		msg, err := ioutil.ReadAll(resp.Body)
+		msg, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, err
 		}

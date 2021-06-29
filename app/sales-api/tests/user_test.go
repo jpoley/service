@@ -10,10 +10,11 @@ import (
 	"testing"
 
 	"github.com/ardanlabs/service/app/sales-api/handlers"
-	"github.com/ardanlabs/service/business/auth"
+	"github.com/ardanlabs/service/business/data/tests"
 	"github.com/ardanlabs/service/business/data/user"
-	"github.com/ardanlabs/service/business/tests"
-	"github.com/ardanlabs/service/business/validate"
+	"github.com/ardanlabs/service/business/sys/auth"
+	"github.com/ardanlabs/service/business/sys/metrics"
+	"github.com/ardanlabs/service/business/sys/validate"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -30,12 +31,25 @@ type UserTests struct {
 
 // TestUsers is the entry point for testing user management functions.
 func TestUsers(t *testing.T) {
-	test := tests.NewIntegration(t)
+	test := tests.NewIntegration(
+		t,
+		tests.DBContainer{
+			Image: "postgres:13-alpine",
+			Port:  "5432",
+			Args:  []string{"-e", "POSTGRES_PASSWORD=postgres"},
+		},
+	)
 	t.Cleanup(test.Teardown)
 
 	shutdown := make(chan os.Signal, 1)
 	tests := UserTests{
-		app:        handlers.API("develop", shutdown, test.Log, test.Auth, test.DB),
+		app: handlers.APIMux(handlers.APIMuxConfig{
+			Shutdown: shutdown,
+			Log:      test.Log,
+			Metrics:  metrics.New(),
+			Auth:     test.Auth,
+			DB:       test.DB,
+		}),
 		kid:        test.KID,
 		userToken:  test.Token("user@example.com", "gophers"),
 		adminToken: test.Token("admin@example.com", "gophers"),
@@ -163,7 +177,7 @@ func (ut *UserTests) postUser400(t *testing.T) {
 // postUser403 validates a user can't be created unless the calling user is
 // an admin. Regular users can't do this.
 func (ut *UserTests) postUser403(t *testing.T) {
-	body, err := json.Marshal(&user.Info{})
+	body, err := json.Marshal(&user.User{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +204,7 @@ func (ut *UserTests) postUser403(t *testing.T) {
 // postUser401 validates a user can't be created unless the calling user is
 // authenticated.
 func (ut *UserTests) postUser401(t *testing.T) {
-	body, err := json.Marshal(&user.Info{})
+	body, err := json.Marshal(&user.User{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +267,8 @@ func (ut *UserTests) getUser403(t *testing.T) {
 		testID := 0
 		t.Logf("\tTest %d:\tWhen fetching the admin user as a regular data.", testID)
 		{
-			r := httptest.NewRequest(http.MethodGet, "/v1/users/"+tests.AdminID, nil)
+			const adminID = "5cf37266-3473-4006-984f-9325122678b7"
+			r := httptest.NewRequest(http.MethodGet, "/v1/users/"+adminID, nil)
 			w := httptest.NewRecorder()
 
 			r.Header.Set("Authorization", "Bearer "+ut.userToken)
@@ -277,8 +292,8 @@ func (ut *UserTests) getUser403(t *testing.T) {
 		testID = 1
 		t.Logf("\tTest %d:\tWhen fetching the user as themselves.", testID)
 		{
-
-			r := httptest.NewRequest(http.MethodGet, "/v1/users/"+tests.UserID, nil)
+			const userID = "45b5fbd3-755f-4379-8f07-a58d4a30fa2f"
+			r := httptest.NewRequest(http.MethodGet, "/v1/users/"+userID, nil)
 			w := httptest.NewRecorder()
 
 			r.Header.Set("Authorization", "Bearer "+ut.userToken)
@@ -398,7 +413,7 @@ func (ut *UserTests) crudUser(t *testing.T) {
 }
 
 // postUser201 validates a user can be created with the endpoint.
-func (ut *UserTests) postUser201(t *testing.T) user.Info {
+func (ut *UserTests) postUser201(t *testing.T) user.User {
 	nu := user.NewUser{
 		Name:            "Bill Kennedy",
 		Email:           "bill@ardanlabs.com",
@@ -419,7 +434,7 @@ func (ut *UserTests) postUser201(t *testing.T) user.Info {
 	ut.app.ServeHTTP(w, r)
 
 	// This needs to be returned for other tests.
-	var got user.Info
+	var got user.User
 
 	t.Log("Given the need to create a new user with the users endpoint.")
 	{
@@ -491,7 +506,7 @@ func (ut *UserTests) getUser200(t *testing.T, id string) {
 			}
 			t.Logf("\t%s\tTest %d:\tShould receive a status code of 200 for the response.", tests.Success, testID)
 
-			var got user.Info
+			var got user.User
 			if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to unmarshal the response : %v", tests.Failed, testID, err)
 			}
@@ -543,7 +558,7 @@ func (ut *UserTests) putUser204(t *testing.T, id string) {
 			}
 			t.Logf("\t%s\tTest %d:\tShould receive a status code of 200 for the retrieve.", tests.Success, testID)
 
-			var ru user.Info
+			var ru user.User
 			if err := json.NewDecoder(w.Body).Decode(&ru); err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to unmarshal the response : %v", tests.Failed, testID, err)
 			}

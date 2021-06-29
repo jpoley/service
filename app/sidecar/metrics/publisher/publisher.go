@@ -1,10 +1,12 @@
+// Package publisher manages the publishing of metrics.
 package publisher
 
 import (
 	"encoding/json"
-	"log"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Set of possible publisher types.
@@ -30,7 +32,7 @@ type Publisher func(map[string]interface{})
 // Publish provides the ability to receive metrics
 // on an interval.
 type Publish struct {
-	log       *log.Logger
+	log       *zap.SugaredLogger
 	collector Collector
 	publisher []Publisher
 	wg        sync.WaitGroup
@@ -39,7 +41,7 @@ type Publish struct {
 }
 
 // New creates a Publish for consuming and publishing metrics.
-func New(log *log.Logger, collector Collector, interval time.Duration, publisher ...Publisher) (*Publish, error) {
+func New(log *zap.SugaredLogger, collector Collector, interval time.Duration, publisher ...Publisher) (*Publish, error) {
 	p := Publish{
 		log:       log,
 		collector: collector,
@@ -75,7 +77,7 @@ func (p *Publish) Stop() {
 func (p *Publish) update() {
 	data, err := p.collector.Collect()
 	if err != nil {
-		p.log.Println(err)
+		p.log.Errorw("publish", "status", "collect data", "ERROR", err)
 		return
 	}
 
@@ -88,11 +90,11 @@ func (p *Publish) update() {
 
 // Stdout provide our basic publishing.
 type Stdout struct {
-	log *log.Logger
+	log *zap.SugaredLogger
 }
 
 // NewStdout initializes stdout for publishing metrics.
-func NewStdout(log *log.Logger) *Stdout {
+func NewStdout(log *zap.SugaredLogger) *Stdout {
 	return &Stdout{log}
 }
 
@@ -100,13 +102,13 @@ func NewStdout(log *log.Logger) *Stdout {
 func (s *Stdout) Publish(data map[string]interface{}) {
 	rawJSON, err := json.Marshal(data)
 	if err != nil {
-		s.log.Println("Stdout : Marshal ERROR :", err)
+		s.log.Errorw("stdout", "status", "marshal data", "ERROR", err)
 		return
 	}
 
 	var d map[string]interface{}
 	if err := json.Unmarshal(rawJSON, &d); err != nil {
-		s.log.Println("Stdout : Unmarshal ERROR :", err)
+		s.log.Errorw("stdout", "status", "unmarshal data", "ERROR", err)
 		return
 	}
 
@@ -124,5 +126,5 @@ func (s *Stdout) Publish(data map[string]interface{}) {
 	if err != nil {
 		return
 	}
-	s.log.Println("Stdout :\n", string(out))
+	s.log.Infow("stdout", "data", string(out))
 }

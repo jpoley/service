@@ -6,39 +6,37 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/ardanlabs/service/business/auth"
 	"github.com/ardanlabs/service/business/data/user"
-	"github.com/ardanlabs/service/business/validate"
+	"github.com/ardanlabs/service/business/sys/auth"
+	"github.com/ardanlabs/service/business/sys/validate"
+	"github.com/ardanlabs/service/foundation/database"
 	"github.com/ardanlabs/service/foundation/web"
 	"github.com/pkg/errors"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type userGroup struct {
-	user user.User
-	auth *auth.Auth
+	store user.Store
+	auth  *auth.Auth
 }
 
 func (ug userGroup) query(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.userGroup.query")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
 	}
 
-	params := web.Params(r)
-	pageNumber, err := strconv.Atoi(params["page"])
+	page := web.Param(r, "page")
+	pageNumber, err := strconv.Atoi(page)
 	if err != nil {
-		return validate.NewRequestError(fmt.Errorf("invalid page format: %s", params["page"]), http.StatusBadRequest)
+		return validate.NewRequestError(fmt.Errorf("invalid page format: %s", page), http.StatusBadRequest)
 	}
-	rowsPerPage, err := strconv.Atoi(params["rows"])
+	rows := web.Param(r, "rows")
+	rowsPerPage, err := strconv.Atoi(rows)
 	if err != nil {
-		return validate.NewRequestError(fmt.Errorf("invalid rows format: %s", params["rows"]), http.StatusBadRequest)
+		return validate.NewRequestError(fmt.Errorf("invalid rows format: %s", rows), http.StatusBadRequest)
 	}
 
-	users, err := ug.user.Query(ctx, v.TraceID, pageNumber, rowsPerPage)
+	users, err := ug.store.Query(ctx, v.TraceID, pageNumber, rowsPerPage)
 	if err != nil {
 		return errors.Wrap(err, "unable to query for users")
 	}
@@ -47,9 +45,6 @@ func (ug userGroup) query(ctx context.Context, w http.ResponseWriter, r *http.Re
 }
 
 func (ug userGroup) queryByID(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.userGroup.queryByID")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
@@ -60,18 +55,18 @@ func (ug userGroup) queryByID(ctx context.Context, w http.ResponseWriter, r *htt
 		return errors.New("claims missing from context")
 	}
 
-	params := web.Params(r)
-	usr, err := ug.user.QueryByID(ctx, v.TraceID, claims, params["id"])
+	id := web.Param(r, "id")
+	usr, err := ug.store.QueryByID(ctx, v.TraceID, claims, id)
 	if err != nil {
 		switch errors.Cause(err) {
-		case user.ErrInvalidID:
+		case database.ErrInvalidID:
 			return validate.NewRequestError(err, http.StatusBadRequest)
-		case user.ErrNotFound:
+		case database.ErrNotFound:
 			return validate.NewRequestError(err, http.StatusNotFound)
-		case user.ErrForbidden:
+		case database.ErrForbidden:
 			return validate.NewRequestError(err, http.StatusForbidden)
 		default:
-			return errors.Wrapf(err, "ID: %s", params["id"])
+			return errors.Wrapf(err, "ID: %s", id)
 		}
 	}
 
@@ -79,9 +74,6 @@ func (ug userGroup) queryByID(ctx context.Context, w http.ResponseWriter, r *htt
 }
 
 func (ug userGroup) create(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.userGroup.create")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
@@ -92,7 +84,7 @@ func (ug userGroup) create(ctx context.Context, w http.ResponseWriter, r *http.R
 		return errors.Wrap(err, "unable to decode payload")
 	}
 
-	usr, err := ug.user.Create(ctx, v.TraceID, nu, v.Now)
+	usr, err := ug.store.Create(ctx, v.TraceID, nu, v.Now)
 	if err != nil {
 		return errors.Wrapf(err, "User: %+v", &usr)
 	}
@@ -101,9 +93,6 @@ func (ug userGroup) create(ctx context.Context, w http.ResponseWriter, r *http.R
 }
 
 func (ug userGroup) update(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.userGroup.update")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
@@ -119,18 +108,18 @@ func (ug userGroup) update(ctx context.Context, w http.ResponseWriter, r *http.R
 		return errors.Wrap(err, "unable to decode payload")
 	}
 
-	params := web.Params(r)
-	err := ug.user.Update(ctx, v.TraceID, claims, params["id"], upd, v.Now)
+	id := web.Param(r, "id")
+	err := ug.store.Update(ctx, v.TraceID, claims, id, upd, v.Now)
 	if err != nil {
 		switch errors.Cause(err) {
-		case user.ErrInvalidID:
+		case database.ErrInvalidID:
 			return validate.NewRequestError(err, http.StatusBadRequest)
-		case user.ErrNotFound:
+		case database.ErrNotFound:
 			return validate.NewRequestError(err, http.StatusNotFound)
-		case user.ErrForbidden:
+		case database.ErrForbidden:
 			return validate.NewRequestError(err, http.StatusForbidden)
 		default:
-			return errors.Wrapf(err, "ID: %s  User: %+v", params["id"], &upd)
+			return errors.Wrapf(err, "ID: %s  User: %+v", id, &upd)
 		}
 	}
 
@@ -138,9 +127,6 @@ func (ug userGroup) update(ctx context.Context, w http.ResponseWriter, r *http.R
 }
 
 func (ug userGroup) delete(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.userGroup.delete")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
@@ -151,18 +137,18 @@ func (ug userGroup) delete(ctx context.Context, w http.ResponseWriter, r *http.R
 		return errors.New("claims missing from context")
 	}
 
-	params := web.Params(r)
-	err := ug.user.Delete(ctx, v.TraceID, claims, params["id"])
+	id := web.Param(r, "id")
+	err := ug.store.Delete(ctx, v.TraceID, claims, id)
 	if err != nil {
 		switch errors.Cause(err) {
-		case user.ErrInvalidID:
+		case database.ErrInvalidID:
 			return validate.NewRequestError(err, http.StatusBadRequest)
-		case user.ErrNotFound:
+		case database.ErrNotFound:
 			return validate.NewRequestError(err, http.StatusNotFound)
-		case user.ErrForbidden:
+		case database.ErrForbidden:
 			return validate.NewRequestError(err, http.StatusForbidden)
 		default:
-			return errors.Wrapf(err, "ID: %s", params["id"])
+			return errors.Wrapf(err, "ID: %s", id)
 		}
 	}
 
@@ -170,9 +156,6 @@ func (ug userGroup) delete(ctx context.Context, w http.ResponseWriter, r *http.R
 }
 
 func (ug userGroup) token(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	ctx, span := trace.SpanFromContext(ctx).Tracer().Start(ctx, "handlers.userGroup.token")
-	defer span.End()
-
 	v, ok := ctx.Value(web.KeyValues).(*web.Values)
 	if !ok {
 		return web.NewShutdownError("web value missing from context")
@@ -184,22 +167,21 @@ func (ug userGroup) token(ctx context.Context, w http.ResponseWriter, r *http.Re
 		return validate.NewRequestError(err, http.StatusUnauthorized)
 	}
 
-	claims, err := ug.user.Authenticate(ctx, v.TraceID, v.Now, email, pass)
+	claims, err := ug.store.Authenticate(ctx, v.TraceID, v.Now, email, pass)
 	if err != nil {
 		switch errors.Cause(err) {
-		case user.ErrAuthenticationFailure:
+		case database.ErrAuthenticationFailure:
 			return validate.NewRequestError(err, http.StatusUnauthorized)
 		default:
 			return errors.Wrap(err, "authenticating")
 		}
 	}
 
-	params := web.Params(r)
-
+	kid := web.Param(r, "kid")
 	var tkn struct {
 		Token string `json:"token"`
 	}
-	tkn.Token, err = ug.auth.GenerateToken(params["kid"], claims)
+	tkn.Token, err = ug.auth.GenerateToken(kid, claims)
 	if err != nil {
 		return errors.Wrap(err, "generating token")
 	}

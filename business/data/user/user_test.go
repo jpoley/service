@@ -5,20 +5,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ardanlabs/service/business/auth"
 	"github.com/ardanlabs/service/business/data/schema"
+	"github.com/ardanlabs/service/business/data/tests"
 	"github.com/ardanlabs/service/business/data/user"
-	"github.com/ardanlabs/service/business/tests"
+	"github.com/ardanlabs/service/business/sys/auth"
+	"github.com/ardanlabs/service/foundation/database"
 	"github.com/dgrijalva/jwt-go/v4"
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
 )
 
+var dbc = tests.DBContainer{
+	Image: "postgres:13-alpine",
+	Port:  "5432",
+	Args:  []string{"-e", "POSTGRES_PASSWORD=postgres"},
+}
+
 func TestUser(t *testing.T) {
-	log, db, teardown := tests.NewUnit(t)
+	log, db, teardown := tests.NewUnit(t, dbc)
 	t.Cleanup(teardown)
 
-	u := user.New(log, db)
+	store := user.NewStore(log, db)
 
 	t.Log("Given the need to work with User records.")
 	{
@@ -37,7 +44,7 @@ func TestUser(t *testing.T) {
 				PasswordConfirm: "gophers",
 			}
 
-			usr, err := u.Create(ctx, traceID, nu, now)
+			usr, err := store.Create(ctx, traceID, nu, now)
 			if err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to create user : %s.", tests.Failed, testID, err)
 			}
@@ -53,7 +60,7 @@ func TestUser(t *testing.T) {
 				Roles: []string{auth.RoleUser},
 			}
 
-			saved, err := u.QueryByID(ctx, traceID, claims, usr.ID)
+			saved, err := store.QueryByID(ctx, traceID, claims, usr.ID)
 			if err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to retrieve user by ID: %s.", tests.Failed, testID, err)
 			}
@@ -78,12 +85,12 @@ func TestUser(t *testing.T) {
 				Roles: []string{auth.RoleAdmin},
 			}
 
-			if err := u.Update(ctx, traceID, claims, usr.ID, upd, now); err != nil {
+			if err := store.Update(ctx, traceID, claims, usr.ID, upd, now); err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to update user : %s.", tests.Failed, testID, err)
 			}
 			t.Logf("\t%s\tTest %d:\tShould be able to update user.", tests.Success, testID)
 
-			saved, err = u.QueryByEmail(ctx, traceID, claims, *upd.Email)
+			saved, err = store.QueryByEmail(ctx, traceID, claims, *upd.Email)
 			if err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to retrieve user by Email : %s.", tests.Failed, testID, err)
 			}
@@ -105,13 +112,13 @@ func TestUser(t *testing.T) {
 				t.Logf("\t%s\tTest %d:\tShould be able to see updates to Email.", tests.Success, testID)
 			}
 
-			if err := u.Delete(ctx, traceID, claims, usr.ID); err != nil {
+			if err := store.Delete(ctx, traceID, claims, usr.ID); err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to delete user : %s.", tests.Failed, testID, err)
 			}
 			t.Logf("\t%s\tTest %d:\tShould be able to delete user.", tests.Success, testID)
 
-			_, err = u.QueryByID(ctx, traceID, claims, usr.ID)
-			if errors.Cause(err) != user.ErrNotFound {
+			_, err = store.QueryByID(ctx, traceID, claims, usr.ID)
+			if errors.Cause(err) != database.ErrNotFound {
 				t.Fatalf("\t%s\tTest %d:\tShould NOT be able to retrieve user : %s.", tests.Failed, testID, err)
 			}
 			t.Logf("\t%s\tTest %d:\tShould NOT be able to retrieve user.", tests.Success, testID)
@@ -119,13 +126,16 @@ func TestUser(t *testing.T) {
 	}
 }
 
-func TestUserPaging(t *testing.T) {
-	log, db, teardown := tests.NewUnit(t)
+func TestPagingUser(t *testing.T) {
+	log, db, teardown := tests.NewUnit(t, dbc)
 	t.Cleanup(teardown)
 
-	schema.Seed(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	u := user.New(log, db)
+	schema.Seed(ctx, db)
+
+	store := user.NewStore(log, db)
 
 	t.Log("Given the need to page through User records.")
 	{
@@ -135,7 +145,7 @@ func TestUserPaging(t *testing.T) {
 			ctx := context.Background()
 			traceID := "00000000-0000-0000-0000-000000000000"
 
-			users1, err := u.Query(ctx, traceID, 1, 1)
+			users1, err := store.Query(ctx, traceID, 1, 1)
 			if err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to retrieve users for page 1 : %s.", tests.Failed, testID, err)
 			}
@@ -146,7 +156,7 @@ func TestUserPaging(t *testing.T) {
 			}
 			t.Logf("\t%s\tTest %d:\tShould have a single user.", tests.Success, testID)
 
-			users2, err := u.Query(ctx, traceID, 2, 1)
+			users2, err := store.Query(ctx, traceID, 2, 1)
 			if err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to retrieve users for page 2 : %s.", tests.Failed, testID, err)
 			}
@@ -168,10 +178,10 @@ func TestUserPaging(t *testing.T) {
 }
 
 func TestAuthenticate(t *testing.T) {
-	log, db, teardown := tests.NewUnit(t)
+	log, db, teardown := tests.NewUnit(t, dbc)
 	t.Cleanup(teardown)
 
-	u := user.New(log, db)
+	store := user.NewStore(log, db)
 
 	t.Log("Given the need to authenticate users")
 	{
@@ -190,13 +200,13 @@ func TestAuthenticate(t *testing.T) {
 				PasswordConfirm: "goroutines",
 			}
 
-			usr, err := u.Create(ctx, traceID, nu, now)
+			usr, err := store.Create(ctx, traceID, nu, now)
 			if err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to create user : %s.", tests.Failed, testID, err)
 			}
 			t.Logf("\t%s\tTest %d:\tShould be able to create user.", tests.Success, testID)
 
-			claims, err := u.Authenticate(ctx, traceID, now, "anna@ardanlabs.com", "goroutines")
+			claims, err := store.Authenticate(ctx, traceID, now, "anna@ardanlabs.com", "goroutines")
 			if err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to generate claims : %s.", tests.Failed, testID, err)
 			}

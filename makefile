@@ -13,12 +13,12 @@ export PROJECT = ardan-starter-kit
 # For testing load on the service.
 # hey -m GET -c 100 -n 10000 -H "Authorization: Bearer ${TOKEN}" http://localhost:3000/v1/users/1/2
 # zipkin: http://localhost:9411
-# expvarmon -ports=":4000" -vars="build,requests,goroutines,errors,mem:memstats.Alloc"
+# expvarmon -ports=":4000" -vars="build,requests,goroutines,errors,panics,mem:memstats.Alloc"
 
 # Used to install expvarmon program for metrics dashboard.
 # go install github.com/divan/expvarmon@latest
 
-# // To generate a private/public key PEM file.
+# To generate a private/public key PEM file.
 # openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:2048
 # openssl rsa -pubout -in private.pem -out public.pem
 # ./sales-admin genkey
@@ -26,81 +26,105 @@ export PROJECT = ardan-starter-kit
 # ==============================================================================
 # Building containers
 
+# $(shell git rev-parse --short HEAD)
+VERSION := 1.0
+
 all: sales metrics
 
 sales:
 	docker build \
 		-f zarf/docker/dockerfile.sales-api \
-		-t sales-api-amd64:1.0 \
-		--build-arg VCS_REF=`git rev-parse HEAD` \
-		--build-arg BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”` \
+		-t sales-api-amd64:$(VERSION) \
+		--build-arg VCS_REF=$(VERSION) \
+		--build-arg BUILD_DATE=`date -u +"%Y-%m-%dT%H:%M:%SZ"` \
 		.
 
 metrics:
 	docker build \
 		-f zarf/docker/dockerfile.metrics \
-		-t metrics-amd64:1.0 \
-		--build-arg VCS_REF=`git rev-parse HEAD` \
-		--build-arg BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”` \
+		-t metrics-amd64:$(VERSION) \
+		--build-arg VCS_REF=$(VERSION) \
+		--build-arg BUILD_DATE=`date -u +"%Y-%m-%dT%H:%M:%SZ"` \
 		.
-
-# ==============================================================================
-# Running from within docker compose
-
-run: up seed
-
-up:
-	docker-compose -f zarf/compose/compose.yaml -f zarf/compose/compose-config.yaml up --detach --remove-orphans
-
-down:
-	docker-compose -f zarf/compose/compose.yaml down --remove-orphans
-
-logs:
-	docker-compose -f zarf/compose/compose.yaml logs -f
 
 # ==============================================================================
 # Running from within k8s/dev
 
+KIND_CLUSTER := ardan-starter-cluster
+
+# Upgrade to latest Kind (>=v0.11): e.g. brew upgrade kind
+# For full Kind v0.11 release notes: https://github.com/kubernetes-sigs/kind/releases/tag/v0.11.0
+# Kind release used for our project: https://github.com/kubernetes-sigs/kind/releases/tag/v0.11.1
+# The image used below was copied by the above link and supports both amd64 and arm64.
+
 kind-up:
-	kind create cluster --image kindest/node:v1.20.2 --name ardan-starter-cluster --config zarf/k8s/dev/kind-config.yaml
+	kind create cluster \
+		--image kindest/node:v1.21.1@sha256:69860bda5563ac81e3c0057d654b5253219618a22ec3a346306239bba8cfa1a6 \
+		--name $(KIND_CLUSTER) \
+		--config zarf/k8s/kind/kind-config.yaml
+	kubectl config set-context --current --namespace=sales-system
 
 kind-down:
-	kind delete cluster --name ardan-starter-cluster
+	kind delete cluster --name $(KIND_CLUSTER)
 
 kind-load:
-	kind load docker-image sales-api-amd64:1.0 --name ardan-starter-cluster
-	kind load docker-image metrics-amd64:1.0 --name ardan-starter-cluster
+	cd zarf/k8s/kind/sales-pod; kustomize edit set image sales-api-image=sales-api-amd64:$(VERSION)
+	cd zarf/k8s/kind/sales-pod; kustomize edit set image metrics-image=metrics-amd64:$(VERSION)
+	kind load docker-image sales-api-amd64:$(VERSION) --name $(KIND_CLUSTER)
+	kind load docker-image metrics-amd64:$(VERSION) --name $(KIND_CLUSTER)
 
 kind-services:
-	kustomize build zarf/k8s/dev | kubectl apply -f -
+	kustomize build zarf/k8s/kind/database-pod | kubectl apply -f -
+	kubectl wait --namespace=database-system --timeout=120s --for=condition=Available deployment/database-pod
+	kustomize build zarf/k8s/kind/sales-pod | kubectl apply -f -
 
-kind-update: sales
-	kind load docker-image sales-api-amd64:1.0 --name ardan-starter-cluster
-	kubectl delete pods -lapp=sales-api
+kind-services-delete:
+	kustomize build zarf/k8s/kind/sales-pod | kubectl delete -f -
+	kustomize build zarf/k8s/kind/database-pod | kubectl delete -f -
 
-kind-metrics: metrics
-	kind load docker-image metrics-amd64:1.0 --name ardan-starter-cluster
-	kubectl delete pods -lapp=sales-api
+kind-update: all kind-load
+	kubectl rollout restart deployment sales-pod
+
+kind-update-newversion: all kind-load kind-services
 
 kind-logs:
-	kubectl logs -lapp=sales-api --all-containers=true -f
+	kubectl logs -l app=sales --all-containers=true -f --tail=100 | go run app/logfmt/main.go
+
+kind-logs-sales:
+	kubectl logs -l app=sales --all-containers=true -f --tail=100 | go run app/logfmt/main.go -service=SALES-API | jq
 
 kind-status:
-	kubectl get nodes
-	kubectl get pods --watch
+	kubectl get nodes -o wide
+	kubectl get svc -o wide
+	kubectl get pods -o wide --watch --all-namespaces
 
-kind-status-full:
-	kubectl describe pod -lapp=sales-api
+kind-describe:
+	kubectl describe nodes
+	kubectl describe svc
+	kubectl describe pod -l app=sales
+
+kind-describe-deployment:
+	kubectl describe deployment sales-pod
+
+kind-describe-replicaset:
+	kubectl get rs
+	kubectl describe rs -l app=sales
+
+kind-events:
+	kubectl get ev --sort-by metadata.creationTimestamp
+
+kind-events-warn:
+	kubectl get ev --field-selector type=Warning --sort-by metadata.creationTimestamp
+
+kind-context-sales:
+	kubectl config set-context --current --namespace=sales-system
 
 kind-shell:
-	kubectl exec -it $(shell kubectl get pods | grep sales-api | cut -c1-26) --container app -- /bin/sh
+	kubectl exec -it $(shell kubectl get pods | grep app | cut -c1-26) --container app -- /bin/sh
 
 kind-database:
 	# ./admin --db-disable-tls=1 migrate
 	# ./admin --db-disable-tls=1 seed
-
-kind-delete:
-	kustomize build zarf/k8s/dev | kubectl delete -f -
 
 # ==============================================================================
 # Administration
@@ -116,7 +140,7 @@ seed: migrate
 
 test:
 	go test ./... -count=1
-	staticcheck ./...
+	staticcheck -checks=all ./...
 
 # ==============================================================================
 # Modules support
@@ -145,25 +169,22 @@ list:
 # ==============================================================================
 # Docker support
 
-FILES := $(shell docker ps -aq)
+docker-down:
+	docker rm -f $(shell docker ps -aq)
 
-down-local:
-	docker stop $(FILES)
-	docker rm $(FILES)
-
-clean:
+docker-clean:
 	docker system prune -f	
 
-logs-local:
-	docker logs -f $(FILES)
+docker-kind-logs:
+	docker logs -f $(KIND_CLUSTER)-control-plane
 
 # ==============================================================================
 # GCP
 
 export PROJECT = ardan-starter-kit
-CLUSTER = ardan-starter-cluster
-DATABASE = ardan-starter-db
-ZONE = us-central1-b
+CLUSTER := ardan-starter-cluster
+DATABASE := ardan-starter-db
+ZONE := us-central1-b
 
 gcp-config:
 	@echo Setting environment for $(PROJECT)
@@ -181,10 +202,10 @@ gcp-cluster:
 	gcloud compute instances list
 
 gcp-upload:
-	docker tag sales-api-amd64:1.0 gcr.io/$(PROJECT)/sales-api-amd64:1.0
-	docker tag metrics-amd64:1.0 gcr.io/$(PROJECT)/metrics-amd64:1.0
-	docker push gcr.io/$(PROJECT)/sales-api-amd64:1.0
-	docker push gcr.io/$(PROJECT)/metrics-amd64:1.0
+	docker tag sales-api-amd64:1.0 gcr.io/$(PROJECT)/sales-api-amd64:$(VERSION)
+	docker tag metrics-amd64:1.0 gcr.io/$(PROJECT)/metrics-amd64:$(VERSION)
+	docker push gcr.io/$(PROJECT)/sales-api-amd64:$(VERSION)
+	docker push gcr.io/$(PROJECT)/metrics-amd64:$(VERSION)
 
 gcp-database:
 	# Create User/Password
@@ -200,34 +221,44 @@ gcp-db-private-ip:
 	gcloud sql instances describe $(DATABASE)
 
 gcp-services:
-	# The zarf/k8s/stg/stg-config.yaml file needs the private IP of the database.
-	kustomize build zarf/k8s/stg | kubectl apply -f -
-	# kubectl create -f deploy-sales-api.yaml
-	# kubectl expose -f expose-sales-api.yaml --type=LoadBalancer
+	kustomize build zarf/k8s/gcp/sales-pod | kubectl apply -f -
 
 gcp-status:
 	gcloud container clusters list
-	kubectl get nodes
-	kubectl get pods
-	kubectl get services sales-api
+	kubectl get nodes -o wide
+	kubectl get svc -o wide
+	kubectl get pods -o wide --watch
+
+gcp-status-full:
+	kubectl describe nodes
+	kubectl describe svc
+	kubectl describe pod -l app=sales
+
+gcp-events:
+	kubectl get ev --sort-by metadata.creationTimestamp
+
+gcp-events-warn:
+	kubectl get ev --field-selector type=Warning --sort-by metadata.creationTimestamp
 
 gcp-logs:
-	kubectl logs -lapp=sales-api --all-containers=true -f
+	kubectl logs -l app=sales --all-containers=true -f --tail=100 | go run app/logfmt/main.go
+
+gcp-logs-sales:
+	kubectl logs -l app=sales --all-containers=true -f --tail=100 | go run app/logfmt/main.go -service=SALES-API | jq
 
 gcp-shell:
-	kubectl exec -it $(shell kubectl get pods | grep sales-api | cut -c1-26 | head -1) --container app -- /bin/sh
+	kubectl exec -it $(shell kubectl get pods | grep sales | cut -c1-26 | head -1) --container app -- /bin/sh
 	# ./admin --db-disable-tls=1 migrate
 	# ./admin --db-disable-tls=1 seed
 
-gcp-delete:
-	kubectl delete services sales-api
-	kubectl delete deployment sales-api	
+gcp-delete-all: gcp-delete
+	kustomize build zarf/k8s/gcp/sales-pod | kubectl delete -f -
 	gcloud container clusters delete $(CLUSTER)
 	gcloud projects delete sales-api
-	gcloud container images delete gcr.io/$(PROJECT)/sales-api-amd64:1.0 --force-delete-tags
-	gcloud container images delete gcr.io/$(PROJECT)/metrics-amd64:1.0 --force-delete-tags
-	docker image remove gcr.io/sales-api/sales-api-amd64:1.0
-	docker image remove gcr.io/sales-api/metrics-amd64:1.0
+	gcloud container images delete gcr.io/$(PROJECT)/sales-api-amd64:$(VERSION) --force-delete-tags
+	gcloud container images delete gcr.io/$(PROJECT)/metrics-amd64:$(VERSION) --force-delete-tags
+	docker image remove gcr.io/sales-api/sales-api-amd64:$(VERSION)
+	docker image remove gcr.io/sales-api/metrics-amd64:$(VERSION)
 
 #===============================================================================
 # GKE Installation

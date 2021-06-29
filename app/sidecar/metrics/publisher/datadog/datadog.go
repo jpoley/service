@@ -1,10 +1,11 @@
+// Package datadog provides support for publishing metrics to DD.
 package datadog
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -153,7 +154,7 @@ func sendDatadog(d *Datadog, data []byte) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusAccepted {
-		out, err := ioutil.ReadAll(resp.Body)
+		out, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return fmt.Errorf("status[%d] : %s", resp.StatusCode, out)
 		}
