@@ -1,28 +1,21 @@
-# Ultimate Service
+# Ultimate Go: Service with Kubernetes
 
 [![CircleCI](https://circleci.com/gh/ardanlabs/service.svg?style=svg)](https://circleci.com/gh/ardanlabs/service)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ardanlabs/service)](https://goreportcard.com/report/github.com/ardanlabs/service)
 [![go.mod Go version](https://img.shields.io/github/go-mod/go-version/ardanlabs/service)](https://github.com/ardanlabs/service)
 
-Copyright 2018, 2019, 2020, 2021, Ardan Labs  
-info@ardanlabs.com
+[![InsightsSnapshot](https://dl.circleci.com/insights-snapshot/gh/ardanlabs/service/master/workflow/badge.svg)](https://app.circleci.com/insights/github/ardanlabs/service/workflows/workflow/overview?branch=master)
 
-## Ultimate Service 2.0 Video
+Copyright 2018, 2019, 2020, 2021, 2022, 2023, Ardan Labs  
+hello@ardanlabs.com
 
-If you are watching the Ultimate Service video on the ArdanLabs [education](https://education.ardanlabs.com/) site,
-please use this branch in the repo.
-
-https://github.com/ardanlabs/service/tree/class
-
-This branch represents the code that is explained. I will be going back into
-the studio in April, 2021 to re-record the video for all the changes in the
-past year.
-
-## Ultimate Service 3.0 Live Classes
+## Description
 
 This class teaches how to build production-level services in Go leveraging the power of Kubernetes. From the beginning, you will pair program with the instructor walking through the design philosophies and guidelines for building services in Go. With each new feature that is added to the service, you will learn how to deploy to and manage the Kubernetes environment used to run the service.
 
-[Course Outline](https://github.com/ardanlabs/service/wiki/course-outline) | [Class Schedule](https://www.eventbrite.com/o/ardan-labs-7092394651)
+Learn more about the project:
+
+[Wiki](https://github.com/ardanlabs/service/wiki) | [Course Outline](https://github.com/ardanlabs/service/wiki/course-outline) | [Class Schedule](https://www.eventbrite.com/o/ardan-labs-7092394651)
 
 ## Licensing
 
@@ -40,35 +33,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-## About The Project
-
-Please read the project wiki.
-
-https://github.com/ardanlabs/service/wiki
-
 ## Learn More
 
-**To learn about Corporate training events, options and special pricing please contact:**
+**Reach out about corporate training events, open enrollment live training sessions, and on-demand learning options.**
 
-William Kennedy  
-ArdanLabs (www.ardanlabs.com)  
-bill@ardanlabs.com  
+Ardan Labs (www.ardanlabs.com)  
+hello@ardanlabs.com
 
-* [Purchase Video](https://github.com/ardanlabs/gotraining#purchase-video)
-* [Experience](https://github.com/ardanlabs/gotraining#our-experience)
-* [Teachers](https://github.com/ardanlabs/gotraining#our-teachers)
-* [More About Go](https://github.com/ardanlabs/gotraining#more-about-go)
-* [Minimal Qualified Student](https://github.com/ardanlabs/gotraining#minimal-qualified-student)
-* [Important Reading](https://github.com/ardanlabs/gotraining#important-reading)
-* [Before You Come To Class](https://github.com/ardanlabs/gotraining#before-you-come-to-class)
-* [Starter Material](https://github.com/ardanlabs/gotraining#starter-material)
-* [Get The Training Material](https://github.com/ardanlabs/gotraining#go-get-the-training-material)
+## Index
+
+* [Purchase Video](https://github.com/ardanlabs/service#purchase-video)
+* [Experience](https://github.com/ardanlabs/service#our-experience)
+* [Teacher](https://github.com/ardanlabs/service#our-teacher)
+* [More About Go](https://github.com/ardanlabs/service#more-about-go)
+* [Minimal Qualified Student](https://github.com/ardanlabs/service#minimal-qualified-student)
+* [Important Reading](https://github.com/ardanlabs/service#important-reading)
+* [Before You Come To Class](https://github.com/ardanlabs/service#before-you-come-to-class)
 
 ## Purchase Video
 
 The entire training class has been recorded to be made available to those who can't have the class taught at their company or who can't attend a conference. This is the entire class material.
 
-[education.ardanlabs.com](https://education.ardanlabs.com)
+[ardanlabs.com/education](https://www.ardanlabs.com/education/)
 
 ## Our Experience
 
@@ -76,13 +62,13 @@ We have taught Go to thousands of developers all around the world since 2014. Th
 
 Our classes are perfect for intermediate-level developers who have at least a few months to years of experience writing code in Go. Our classes provide a very deep knowledge of the programming langauge with a big push on language mechanics, design philosophies and guidelines. We focus on teaching how to write code with a priority on consistency, integrity, readability and simplicity. We cover a lot about “if performance matters” with a focus on mechanical sympathy, data oriented design, decoupling and writing/debugging production software.
 
-## Our Teachers
+## Our Teacher
 
 ### William Kennedy ([@goinggodotnet](https://twitter.com/goinggodotnet))  
-_William Kennedy is a managing partner at Ardan Labs in Miami, Florida. Ardan Labs is a high-performance development and training firm working with startups and fortune 500 companies. He is also a co-author of the book Go in Action, the author of the blog GoingGo.Net, and a founding member of GoBridge which is working to increase Go adoption through diversity._
+_William Kennedy is a managing partner at Ardan Labs in Miami, Florida, a mobile, web, and systems development company. Bill has written extensively on the Ardan Labs blog, has written two books, and has trained thousands of developers worldwide in Go. Bill is also a founding member of GoBridge, which is working to increase Go adoption through diversity._
 
 _**Video Training**_  
-[Ultimate Go Video](https://education.ardanlabs.com)  
+[Ultimate Go Video](https://www.ardanlabs.com/training/ultimate-go/) 
 [Ardan Labs YouTube Channel](http://youtube.ardanlabs.com/)
 
 _**Blog**_  
@@ -96,6 +82,8 @@ _**Articles**_
 [IT World Canada](http://www.itworldcanada.com/article/nascent-google-development-language-shows-promise-for-more-productive-coding/387449)
 
 _**Video**_  
+[P99 Talk (2022) - Evaluating Performance In Go](https://www.youtube.com/watch?v=PYMs-urosXs)  
+[GopherCon Europe (2022) - Practical Memory Profiling](https://www.youtube.com/watch?v=6qAfkJGWsns)  
 [GDN Event #1 (2021) - GoBridge Needs Your Help](https://www.youtube.com/watch?v=Tst0oI97cvQ&t=2s)  
 [Training Within The Go Community (2019)](https://www.youtube.com/watch?v=PSR1twjzzAM&feature=youtu.be)  
 [GopherCon Australia (2019) - Modules](https://www.youtube.com/watch?v=MVxbVR_6Tac)  
@@ -103,7 +91,6 @@ _**Video**_
 [GopherCon Singapore (2019) - Garbage Collection Semantics](https://www.youtube.com/watch?v=q4HoWwdZUHs)  
 [GopherCon India (2019) - Channel Semantics](https://www.youtube.com/watch?v=AHAf1Xfr_HE)  
 [GoWayFest Minsk (2018) - Profiling Web Apps](https://www.youtube.com/watch?v=-GBMFPegqgw)  
-[GopherChina (2018) - Composition In Go William](https://www.youtube.com/watch?v=pvLUO9ZManM&feature=youtu.be)  
 [GopherCon Singapore (2018) - Optimizing For Correctness](https://engineers.sg/video/optimize-for-correctness-gopherconsg-2018--2610)  
 [GopherCon India (2018) - What is the Legacy You Are Leaving Behind](https://www.youtube.com/watch?v=j3zCUc06OXo&t=0s&index=11&list=PLhJxE57Cki63cElK2kmt3_vi8j2eIHTqZ)  
 [Code::Dive (2017) - Optimizing For Correctness](https://www.youtube.com/watch?v=OTLjN8NQDyo)  
@@ -131,6 +118,7 @@ _**Video**_
 
 _**Podcasts**_  
 [Ardan Labs Podcast: On Going Series](https://ardanlabs.buzzsprout.com/)  
+[Mangtas Nation: A Golang Deep Dive with Bill Kennedy](https://anchor.fm/mangtasnation/episodes/A-Golang-Deep-Dive-with-Bill-Kennedy--S2-EP3-e1ij9c3)  
 [GoTime: Design Philosophy](https://changelog.com/gotime/172)  
 [GoTime: Learning and Teaching Go](https://changelog.com/gotime/72)  
 [GoTime: Bill Kennedy on Mechanical Sympathy](https://changelog.com/gotime/6)  
@@ -154,7 +142,7 @@ Go is the fusion of performance and productivity wrapped in a language that soft
 
 ## Minimal Qualified Student
 
-The material has been designed to be taught in a classroom environment. The code is well commented but missing some of the contextual concepts and ideas that will be covered in class. Students with the following minimal background will get the most out of the class.
+The material has been designed to be taught in a classroom environment. The code is well commented but missing some contextual concepts and ideas that will be covered in class. Students with the following minimal background will get the most out of the class.
 
 * Studied CS in school or has a minimum of two years of experience programming full time professionally.
 * Familiar with structural and object oriented programming styles.
@@ -189,39 +177,23 @@ https://bitfieldconsulting.com/books/fundamentals
 
 ### Joining the Go Slack Community
 
-We use a slack channel to share links, code, and examples during the training.  This is free.  This is also the same slack community you will use after training to ask for help and interact with may Go experts around the world in the community.
+We use a Slack channel to share links, code, and examples during the training.  This is free.  This is also the same Slack community you will use after training to ask for help and interact with may Go experts around the world in the community.
 
-1. Using the following link, fill out your name and email address: https://gophersinvite.herokuapp.com/
+1. Using the following link, fill out your name and email address: https://invite.slack.gobridge.org
 1. Check your email, and follow the link to the slack application.
 1. Join the training channel by clicking on this link: https://gophers.slack.com/messages/training/
 1. Click the “Join Channel” button at the bottom of the screen.
-
-### Installing Go
-
-#### Local Installation
-
-https://www.ardanlabs.com/blog/2016/05/installing-go-and-your-workspace.html
-
-### Editors
-
-**Visual Studio Code**  
-https://code.visualstudio.com/Updates  
-https://github.com/microsoft/vscode-go
-
-**VIM**  
-http://www.vim.org/download.php  
-http://farazdagi.com/blog/2015/vim-as-golang-ide/
-
-**Goland**  
-https://www.jetbrains.com/go/
 
 ### Installing the Training Material
 
 While many of the examples can be done using the online playground (http://play.golang.org), some may find it easier to complete them with their local editor.  To do so, you will want to load the training material locally to your machine.  From a command prompt, issue the following commands:
 
-```sh
-mkdir -p $(go env GOPATH)/src/github.com/ardanlabs && cd $_
-git clone https://github.com/ardanlabs/gotraining.git
+```
+$ cd $HOME
+$ mkdir code
+$ cd code
+$ git clone https://github.com/ardanlabs/service
+$ cd service
 ```
 
 *NOTE:* This assumes you have Git installed.  If you don’t, you can find the installation instructions here: https://git-scm.com/
@@ -231,7 +203,7 @@ git clone https://github.com/ardanlabs/gotraining.git
 Jessie Frazelle ([@frazelledazzell](https://twitter.com/frazelledazzell/status/711355859066990592))  
 _"@goinggodotnet you were amazing!!! So enthusiastic!!! Thanks for doing this for everyone!"_
 
-Kelsey Hightower ([‏@kelseyhightower](https://twitter.com/kelseyhightower/status/673359937909592064))  
+Kelsey Hightower ([@kelseyhightower](https://twitter.com/kelseyhightower/status/673359937909592064))  
 _"Day 1 of the [Ultimate] Go workshop was outstanding! Big shoutout to @intel, @golangbridge, and @goinggodotnet for bringing this to Portland."_
 
 Katrina Owen ([@kytrinyx](https://twitter.com/kytrinyx/status/673360428278222848))  

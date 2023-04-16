@@ -9,7 +9,6 @@ import (
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 	en_translations "github.com/go-playground/validator/v10/translations/en"
-	"github.com/google/uuid"
 )
 
 // validate holds the settings and caches for validating request struct values.
@@ -24,7 +23,7 @@ func init() {
 	validate = validator.New()
 
 	// Create a translator for english so the error messages are
-	// more human readable than technical.
+	// more human-readable than technical.
 	translator, _ = ut.New(en.New(), en.New()).GetTranslator("en")
 
 	// Register the english error messages for use.
@@ -41,7 +40,7 @@ func init() {
 }
 
 // Check validates the provided model against it's declared tags.
-func Check(val interface{}) error {
+func Check(val any) error {
 	if err := validate.Struct(val); err != nil {
 
 		// Use a type assertion to get the real error value.
@@ -54,7 +53,7 @@ func Check(val interface{}) error {
 		for _, verror := range verrors {
 			field := FieldError{
 				Field: verror.Field(),
-				Error: verror.Translate(translator),
+				Err:   verror.Translate(translator),
 			}
 			fields = append(fields, field)
 		}
@@ -62,18 +61,5 @@ func Check(val interface{}) error {
 		return fields
 	}
 
-	return nil
-}
-
-// GenerateID generate a unique id for entities.
-func GenerateID() string {
-	return uuid.NewString()
-}
-
-// CheckID validates that the format of an id is valid.
-func CheckID(id string) error {
-	if _, err := uuid.Parse(id); err != nil {
-		return ErrInvalidID
-	}
 	return nil
 }

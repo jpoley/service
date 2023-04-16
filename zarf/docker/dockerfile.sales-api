@@ -1,7 +1,7 @@
 # Build the Go Binary.
-FROM golang:1.16 as build_sales-api
+FROM golang:1.20 as build_sales-api
 ENV CGO_ENABLED 0
-ARG VCS_REF
+ARG BUILD_REF
 
 # Create the service directory and the copy the module files first and then
 # download the dependencies. If this doesn't change, we won't need to do this
@@ -14,30 +14,31 @@ ARG VCS_REF
 # Copy the source code into the container.
 COPY . /service
 
-# Build the admin tool so we can have it in the container. This should not change
-# often so do this first.
-WORKDIR /service/app/sales-admin
-RUN go build -ldflags "-X main.build=${VCS_REF}"
+# Build the admin binary.
+WORKDIR /service/app/tooling/sales-admin
+RUN go build -ldflags "-X main.build=${BUILD_REF}"
 
-# Build the service binary. We are doing this last since this will be different
-# every time we run through this process.
-WORKDIR /service/app/sales-api
-RUN go build -ldflags "-X main.build=${VCS_REF}"
+# Build the service binary.
+WORKDIR /service/app/services/sales-api
+RUN go build -ldflags "-X main.build=${BUILD_REF}"
 
 
 # Run the Go Binary in Alpine.
-FROM alpine:3.13
+FROM alpine:3.17
 ARG BUILD_DATE
-ARG VCS_REF
-COPY --from=build_sales-api /service/zarf/keys/. /service/zarf/keys/.
-COPY --from=build_sales-api /service/app/sales-admin/sales-admin /service/admin
-COPY --from=build_sales-api /service/app/sales-api/sales-api /service/sales-api
+ARG BUILD_REF
+RUN addgroup -g 1000 -S sales && \
+    adduser -u 1000 -h /service -G sales -S sales
+COPY --from=build_sales-api --chown=sales:sales /service/zarf/keys/. /service/zarf/keys/.
+COPY --from=build_sales-api --chown=sales:sales /service/app/tooling/sales-admin/sales-admin /service/sales-admin
+COPY --from=build_sales-api --chown=sales:sales /service/app/services/sales-api/sales-api /service/sales-api
 WORKDIR /service
+USER sales
 CMD ["./sales-api"]
 
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.title="sales-api" \
       org.opencontainers.image.authors="William Kennedy <bill@ardanlabs.com>" \
       org.opencontainers.image.source="https://github.com/ardanlabs/service/app/sales-api" \
-      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.revision="${BUILD_REF}" \
       org.opencontainers.image.vendor="Ardan Labs"

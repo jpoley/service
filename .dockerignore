@@ -1,9 +1,10 @@
 .circleci/
-zarf/compose/
+.git/
+.reading/
+.dockerignore
+.gitignore
 zarf/docker/
 zarf/k8s/
-.dockerignore
-.gitgnore
 CONTRIBUTORS
 LICENSE
 makefile

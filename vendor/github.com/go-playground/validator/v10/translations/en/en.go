@@ -29,6 +29,11 @@ func RegisterDefaultTranslations(v *validator.Validate, trans ut.Translator) (er
 			override:    false,
 		},
 		{
+			tag:         "required_if",
+			translation: "{0} is a required field",
+			override:    false,
+		},
+		{
 			tag: "len",
 			customRegisFunc: func(ut ut.Translator) (err error) {
 				if err = ut.Add("len-string", "{0} must be {1} in length", false); err != nil {
@@ -1137,6 +1142,11 @@ func RegisterDefaultTranslations(v *validator.Validate, trans ut.Translator) (er
 			override:    false,
 		},
 		{
+			tag:         "ulid",
+			translation: "{0} must be a valid ULID",
+			override:    false,
+		},
+		{
 			tag:         "ascii",
 			translation: "{0} must contain only ascii characters",
 			override:    false,
@@ -1257,6 +1267,11 @@ func RegisterDefaultTranslations(v *validator.Validate, trans ut.Translator) (er
 			override:    false,
 		},
 		{
+			tag:         "fqdn",
+			translation: "{0} must be a valid FQDN",
+			override:    false,
+		},
+		{
 			tag:         "unique",
 			translation: "{0} must contain unique values",
 			override:    false,
@@ -1264,6 +1279,11 @@ func RegisterDefaultTranslations(v *validator.Validate, trans ut.Translator) (er
 		{
 			tag:         "iscolor",
 			translation: "{0} must be a valid color",
+			override:    false,
+		},
+		{
+			tag:         "cron",
+			translation: "{0} must be a valid cron expression",
 			override:    false,
 		},
 		{
@@ -1282,6 +1302,11 @@ func RegisterDefaultTranslations(v *validator.Validate, trans ut.Translator) (er
 		{
 			tag:         "json",
 			translation: "{0} must be a valid json string",
+			override:    false,
+		},
+		{
+			tag:         "jwt",
+			translation: "{0} must be a valid jwt string",
 			override:    false,
 		},
 		{
@@ -1335,6 +1360,16 @@ func RegisterDefaultTranslations(v *validator.Validate, trans ut.Translator) (er
 
 				return t
 			},
+		},
+		{
+			tag:         "boolean",
+			translation: "{0} must be a valid boolean value",
+			override:    false,
+		},
+		{
+			tag:         "cve",
+			translation: "{0} must be a valid cve identifier",
+			override:    false,
 		},
 	}
 
