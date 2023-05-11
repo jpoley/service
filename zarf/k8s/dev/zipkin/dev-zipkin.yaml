@@ -31,10 +31,12 @@ spec:
         - name: zipkin
           containerPort: 9411
         resources:
-          limits:
-            cpu: "500m" # Up to 1/2 full core
           requests:
-            cpu: "250m" # Use 1/4 full core
+            cpu: "250m" # I need access to 1/4 core on the node.
+            memory: 500Mi
+          limits:
+            cpu: "250m" # Execute instructions 25ms/100ms on my 1/2 core.
+            memory: 500Mi
 ---
 apiVersion: v1
 kind: Service

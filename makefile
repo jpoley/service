@@ -125,7 +125,7 @@ KIND         := kindest/node:v1.26.3
 POSTGRES     := postgres:15-alpine
 VAULT        := hashicorp/vault:1.13
 ZIPKIN       := openzipkin/zipkin:2.24
-TELEPRESENCE := docker.io/datawire/tel2:2.12.2
+TELEPRESENCE := docker.io/datawire/tel2:2.13.1
 
 dev-brew-common:
 	brew update
@@ -221,13 +221,13 @@ dev-apply:
 	kustomize build zarf/k8s/dev/vault | kubectl apply -f -
 
 	kustomize build zarf/k8s/dev/database | kubectl apply -f -
-	kubectl wait pods --namespace=sales-system --selector app=database --for=condition=Ready
-	
+	kubectl rollout status --namespace=sales-system --watch --timeout=120s sts/database
+
 	kustomize build zarf/k8s/dev/zipkin | kubectl apply -f -
-	kubectl wait --timeout=120s --namespace=sales-system --for=condition=Available deployment/zipkin
+	kubectl wait pods --namespace=sales-system --selector app=zipkin --for=condition=Ready
 	
 	kustomize build zarf/k8s/dev/sales | kubectl apply -f -
-	kubectl wait --timeout=120s --namespace=sales-system --for=condition=Available deployment/sales
+	kubectl wait pods --namespace=sales-system --selector app=sales --for=condition=Ready
 
 dev-restart:
 	kubectl rollout restart deployment sales --namespace=sales-system
