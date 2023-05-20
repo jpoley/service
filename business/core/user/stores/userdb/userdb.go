@@ -4,6 +4,8 @@ package userdb
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -11,6 +13,7 @@ import (
 	"github.com/ardanlabs/service/business/core/user"
 	"github.com/ardanlabs/service/business/data/order"
 	database "github.com/ardanlabs/service/business/sys/database/pgx"
+	"github.com/ardanlabs/service/business/sys/database/pgx/dbarray"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -53,9 +56,9 @@ func (s *Store) WithinTran(ctx context.Context, fn func(s user.Storer) error) er
 func (s *Store) Create(ctx context.Context, usr user.User) error {
 	const q = `
 	INSERT INTO users
-		(user_id, name, email, password_hash, roles, enabled, date_created, date_updated)
+		(user_id, name, email, password_hash, roles, enabled, department, date_created, date_updated)
 	VALUES
-		(:user_id, :name, :email, :password_hash, :roles, :enabled, :date_created, :date_updated)`
+		(:user_id, :name, :email, :password_hash, :roles, :enabled, :department, :date_created, :date_updated)`
 
 	if err := database.NamedExecContext(ctx, s.log, s.db, q, toDBUser(usr)); err != nil {
 		if errors.Is(err, database.ErrDBDuplicatedEntry) {
@@ -77,6 +80,7 @@ func (s *Store) Update(ctx context.Context, usr user.User) error {
 		"email" = :email,
 		"roles" = :roles,
 		"password_hash" = :password_hash,
+		"department" = :department,
 		"date_updated" = :date_updated
 	WHERE
 		user_id = :user_id`
@@ -123,8 +127,8 @@ func (s *Store) Query(ctx context.Context, filter user.QueryFilter, orderBy orde
 	SELECT
 		*
 	FROM
-		users
-	`
+		users`
+
 	buf := bytes.NewBufferString(q)
 	s.applyFilter(filter, data, buf)
 
@@ -192,6 +196,41 @@ func (s *Store) QueryByID(ctx context.Context, userID uuid.UUID) (user.User, err
 	}
 
 	return toCoreUser(dbUsr), nil
+}
+
+// QueryByIDs gets the specified users from the database.
+func (s *Store) QueryByIDs(ctx context.Context, userIDs []uuid.UUID) ([]user.User, error) {
+	ids := make([]string, len(userIDs))
+	for i, userID := range userIDs {
+		ids[i] = userID.String()
+	}
+
+	data := struct {
+		UserID interface {
+			driver.Valuer
+			sql.Scanner
+		} `db:"user_id"`
+	}{
+		UserID: dbarray.Array(ids),
+	}
+
+	const q = `
+	SELECT
+		*
+	FROM
+		users
+	WHERE
+		user_id = ANY(:user_id)`
+
+	var usrs []dbUser
+	if err := database.NamedQuerySlice(ctx, s.log, s.db, q, data, &usrs); err != nil {
+		if errors.Is(err, database.ErrDBNotFound) {
+			return nil, user.ErrNotFound
+		}
+		return nil, fmt.Errorf("namedquerystruct: %w", err)
+	}
+
+	return toCoreUserSlice(usrs), nil
 }
 
 // QueryByEmail gets the specified user from the database by email.

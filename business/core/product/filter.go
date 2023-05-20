@@ -9,9 +9,9 @@ import (
 
 // QueryFilter holds the available fields a query can be filtered on.
 type QueryFilter struct {
-	ID       *uuid.UUID `validate:"omitempty,uuid4"`
+	ID       *uuid.UUID `validate:"omitempty"`
 	Name     *string    `validate:"omitempty,min=3"`
-	Cost     *int       `validate:"omitempty,numeric"`
+	Cost     *float64   `validate:"omitempty,numeric"`
 	Quantity *int       `validate:"omitempty,numeric"`
 }
 
@@ -30,13 +30,11 @@ func (qf *QueryFilter) WithProductID(productID uuid.UUID) {
 
 // WithName sets the Name field of the QueryFilter value.
 func (qf *QueryFilter) WithName(name string) {
-	if name != "" {
-		qf.Name = &name
-	}
+	qf.Name = &name
 }
 
 // WithCost sets the Cost field of the QueryFilter value.
-func (qf *QueryFilter) WithCost(cost int) {
+func (qf *QueryFilter) WithCost(cost float64) {
 	qf.Cost = &cost
 }
 

@@ -9,22 +9,20 @@ import (
 // Product represents an individual product.
 type Product struct {
 	ID          uuid.UUID
-	Name        string
-	Cost        int
-	Quantity    int
-	Sold        int
-	Revenue     int
 	UserID      uuid.UUID
+	Name        string
+	Cost        float64
+	Quantity    int
 	DateCreated time.Time
 	DateUpdated time.Time
 }
 
 // NewProduct is what we require from clients when adding a Product.
 type NewProduct struct {
-	Name     string
-	Cost     int
-	Quantity int
 	UserID   uuid.UUID
+	Name     string
+	Cost     float64
+	Quantity int
 }
 
 // UpdateProduct defines what information may be provided to modify an
@@ -35,6 +33,6 @@ type NewProduct struct {
 // we make exceptions around marshalling/unmarshalling.
 type UpdateProduct struct {
 	Name     *string
-	Cost     *int
+	Cost     *float64
 	Quantity *int
 }

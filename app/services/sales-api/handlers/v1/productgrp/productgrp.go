@@ -8,9 +8,10 @@ import (
 	"net/http"
 
 	"github.com/ardanlabs/service/business/core/product"
+	"github.com/ardanlabs/service/business/core/user"
 	"github.com/ardanlabs/service/business/sys/validate"
 	"github.com/ardanlabs/service/business/web/auth"
-	v1Web "github.com/ardanlabs/service/business/web/v1"
+	v1 "github.com/ardanlabs/service/business/web/v1"
 	"github.com/ardanlabs/service/business/web/v1/paging"
 	"github.com/ardanlabs/service/foundation/web"
 	"github.com/google/uuid"
@@ -23,8 +24,18 @@ var (
 
 // Handlers manages the set of product endpoints.
 type Handlers struct {
-	Product *product.Core
-	Auth    *auth.Auth
+	product *product.Core
+	user    *user.Core
+	auth    *auth.Auth
+}
+
+// New constructs a handlers for route access.
+func New(product *product.Core, user *user.Core, auth *auth.Auth) *Handlers {
+	return &Handlers{
+		product: product,
+		user:    user,
+		auth:    auth,
+	}
 }
 
 // Create adds a new product to the system.
@@ -36,15 +47,15 @@ func (h *Handlers) Create(ctx context.Context, w http.ResponseWriter, r *http.Re
 
 	np, err := toCoreNewProduct(app)
 	if err != nil {
-		return v1Web.NewRequestError(err, http.StatusBadRequest)
+		return v1.NewRequestError(err, http.StatusBadRequest)
 	}
 
-	prd, err := h.Product.Create(ctx, np)
+	prd, err := h.product.Create(ctx, np)
 	if err != nil {
 		return fmt.Errorf("create: app[%+v]: %w", app, err)
 	}
 
-	return web.Respond(ctx, w, prd, http.StatusCreated)
+	return web.Respond(ctx, w, toAppProduct(prd), http.StatusCreated)
 }
 
 // Update updates a product in the system.
@@ -59,22 +70,22 @@ func (h *Handlers) Update(ctx context.Context, w http.ResponseWriter, r *http.Re
 		return validate.NewFieldsError("product_id", err)
 	}
 
-	prd, err := h.Product.QueryByID(ctx, productID)
+	prd, err := h.product.QueryByID(ctx, productID)
 	if err != nil {
 		switch {
 		case errors.Is(err, product.ErrNotFound):
-			return v1Web.NewRequestError(err, http.StatusNotFound)
+			return v1.NewRequestError(err, http.StatusNotFound)
 		default:
 			return fmt.Errorf("querybyid: productID[%s]: %w", productID, err)
 		}
 	}
 
-	prd, err = h.Product.Update(ctx, prd, toCoreUpdateProduct(app))
+	prd, err = h.product.Update(ctx, prd, toCoreUpdateProduct(app))
 	if err != nil {
 		return fmt.Errorf("update: productID[%s] app[%+v]: %w", productID, app, err)
 	}
 
-	return web.Respond(ctx, w, prd, http.StatusOK)
+	return web.Respond(ctx, w, toAppProduct(prd), http.StatusOK)
 }
 
 // Delete removes a product from the system.
@@ -84,7 +95,7 @@ func (h *Handlers) Delete(ctx context.Context, w http.ResponseWriter, r *http.Re
 		return validate.NewFieldsError("product_id", err)
 	}
 
-	prd, err := h.Product.QueryByID(ctx, productID)
+	prd, err := h.product.QueryByID(ctx, productID)
 	if err != nil {
 		switch {
 		case errors.Is(err, product.ErrNotFound):
@@ -92,13 +103,13 @@ func (h *Handlers) Delete(ctx context.Context, w http.ResponseWriter, r *http.Re
 			// Don't send StatusNotFound here since the call to Delete
 			// below won't if this product is not found. We only know
 			// this because we are doing the Query for the UserID.
-			return v1Web.NewRequestError(err, http.StatusNoContent)
+			return v1.NewRequestError(err, http.StatusNoContent)
 		default:
 			return fmt.Errorf("querybyid: productID[%s]: %w", productID, err)
 		}
 	}
 
-	if err := h.Product.Delete(ctx, prd); err != nil {
+	if err := h.product.Delete(ctx, prd); err != nil {
 		return fmt.Errorf("delete: productID[%s]: %w", productID, err)
 	}
 
@@ -122,22 +133,43 @@ func (h *Handlers) Query(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return err
 	}
 
-	prds, err := h.Product.Query(ctx, filter, orderBy, page.Number, page.RowsPerPage)
+	prds, err := h.product.Query(ctx, filter, orderBy, page.Number, page.RowsPerPage)
 	if err != nil {
 		return fmt.Errorf("query: %w", err)
 	}
 
-	items := make([]AppProduct, len(prds))
-	for i, prd := range prds {
-		items[i] = toAppProduct(prd)
+	// -------------------------------------------------------------------------
+	// Capture the unique set of users
+
+	users := make(map[uuid.UUID]user.User)
+	if len(prds) > 0 {
+		for _, prd := range prds {
+			users[prd.UserID] = user.User{}
+		}
+
+		userIDs := make([]uuid.UUID, 0, len(users))
+		for userID := range users {
+			userIDs = append(userIDs, userID)
+		}
+
+		usrs, err := h.user.QueryByIDs(ctx, userIDs)
+		if err != nil {
+			return fmt.Errorf("user.querybyids: userIDs[%s]: %w", userIDs, err)
+		}
+
+		for _, usr := range usrs {
+			users[usr.ID] = usr
+		}
 	}
 
-	total, err := h.Product.Count(ctx, filter)
+	// -------------------------------------------------------------------------
+
+	total, err := h.product.Count(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("count: %w", err)
 	}
 
-	return web.Respond(ctx, w, paging.NewResponse(items, total, page.Number, page.RowsPerPage), http.StatusOK)
+	return web.Respond(ctx, w, paging.NewResponse(toAppProductsDetails(prds, users), total, page.Number, page.RowsPerPage), http.StatusOK)
 }
 
 // QueryByID returns a product by its ID.
@@ -147,11 +179,11 @@ func (h *Handlers) QueryByID(ctx context.Context, w http.ResponseWriter, r *http
 		return validate.NewFieldsError("product_id", err)
 	}
 
-	prd, err := h.Product.QueryByID(ctx, productID)
+	prd, err := h.product.QueryByID(ctx, productID)
 	if err != nil {
 		switch {
 		case errors.Is(err, product.ErrNotFound):
-			return v1Web.NewRequestError(err, http.StatusNotFound)
+			return v1.NewRequestError(err, http.StatusNotFound)
 		default:
 			return fmt.Errorf("querybyid: productID[%s]: %w", productID, err)
 		}

@@ -23,6 +23,8 @@ var (
 	ErrAuthenticationFailure = errors.New("authentication failed")
 )
 
+// =============================================================================
+
 // Storer interface declares the behavior this package needs to perists and
 // retrieve data.
 type Storer interface {
@@ -33,8 +35,11 @@ type Storer interface {
 	Query(ctx context.Context, filter QueryFilter, orderBy order.By, pageNumber int, rowsPerPage int) ([]User, error)
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, userID uuid.UUID) (User, error)
+	QueryByIDs(ctx context.Context, userID []uuid.UUID) ([]User, error)
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
 }
+
+// =============================================================================
 
 // Core manages the set of APIs for user access.
 type Core struct {
@@ -157,6 +162,16 @@ func (c *Core) QueryByID(ctx context.Context, userID uuid.UUID) (User, error) {
 	return user, nil
 }
 
+// QueryByIDs gets the specified user from the database.
+func (c *Core) QueryByIDs(ctx context.Context, userIDs []uuid.UUID) ([]User, error) {
+	user, err := c.storer.QueryByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("query: userIDs[%s]: %w", userIDs, err)
+	}
+
+	return user, nil
+}
+
 // QueryByEmail gets the specified user from the database by email.
 func (c *Core) QueryByEmail(ctx context.Context, email mail.Address) (User, error) {
 	user, err := c.storer.QueryByEmail(ctx, email)
@@ -167,11 +182,13 @@ func (c *Core) QueryByEmail(ctx context.Context, email mail.Address) (User, erro
 	return user, nil
 }
 
+// =============================================================================
+
 // Authenticate finds a user by their email and verifies their password. On
 // success it returns a Claims User representing this user. The claims can be
 // used to generate a token for future authentication.
 func (c *Core) Authenticate(ctx context.Context, email mail.Address, password string) (User, error) {
-	usr, err := c.storer.QueryByEmail(ctx, email)
+	usr, err := c.QueryByEmail(ctx, email)
 	if err != nil {
 		return User{}, fmt.Errorf("query: email[%s]: %w", email, err)
 	}

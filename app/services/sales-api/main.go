@@ -20,8 +20,8 @@ import (
 	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/ardanlabs/service/foundation/vault"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/zipkin"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
@@ -52,12 +52,12 @@ func main() {
 
 func run(log *zap.SugaredLogger) error {
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// GOMAXPROCS
 
 	log.Infow("startup", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Configuration
 
 	cfg := struct {
@@ -89,10 +89,10 @@ func run(log *zap.SugaredLogger) error {
 			MaxOpenConns int    `conf:"default:0"`
 			DisableTLS   bool   `conf:"default:true"`
 		}
-		Zipkin struct {
-			ReporterURI string  `conf:"default:http://zipkin-service.sales-system.svc.cluster.local:9411/api/v2/spans"`
+		Tempo struct {
+			ReporterURI string  `conf:"default:tempo.sales-system.svc.cluster.local:4317"`
 			ServiceName string  `conf:"default:sales-api"`
-			Probability float64 `conf:"default:0.05"`
+			Probability float64 `conf:"default:1"` // Shouldn't use a high value in non-developer systems. 0.05 should be enough for most systems. Some might want to have this even lower
 		}
 	}{
 		Version: conf.Version{
@@ -111,7 +111,7 @@ func run(log *zap.SugaredLogger) error {
 		return fmt.Errorf("parsing config: %w", err)
 	}
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// App Starting
 
 	log.Infow("starting service", "version", build)
@@ -125,7 +125,7 @@ func run(log *zap.SugaredLogger) error {
 
 	expvar.NewString("build").Set(build)
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Database Support
 
 	log.Infow("startup", "status", "initializing database support", "host", cfg.DB.Host)
@@ -147,7 +147,7 @@ func run(log *zap.SugaredLogger) error {
 		db.Close()
 	}()
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Initialize authentication support
 
 	log.Infow("startup", "status", "initializing authentication support")
@@ -178,15 +178,15 @@ func run(log *zap.SugaredLogger) error {
 		return fmt.Errorf("constructing auth: %w", err)
 	}
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Start Tracing Support
 
-	log.Infow("startup", "status", "initializing OT/Zipkin tracing support")
+	log.Infow("startup", "status", "initializing OT/Tempo tracing support")
 
 	traceProvider, err := startTracing(
-		cfg.Zipkin.ServiceName,
-		cfg.Zipkin.ReporterURI,
-		cfg.Zipkin.Probability,
+		cfg.Tempo.ServiceName,
+		cfg.Tempo.ReporterURI,
+		cfg.Tempo.Probability,
 	)
 	if err != nil {
 		return fmt.Errorf("starting tracing: %w", err)
@@ -195,18 +195,18 @@ func run(log *zap.SugaredLogger) error {
 
 	tracer := traceProvider.Tracer("service")
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Start Debug Service
 
 	log.Infow("startup", "status", "debug v1 router started", "host", cfg.Web.DebugHost)
 
 	go func() {
-		if err := http.ListenAndServe(cfg.Web.DebugHost, debug.Mux(build, log, db)); err != nil {
+		if err := http.ListenAndServe(cfg.Web.DebugHost, debug.Mux()); err != nil {
 			log.Errorw("shutdown", "status", "debug v1 router closed", "host", cfg.Web.DebugHost, "ERROR", err)
 		}
 	}()
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Start API Service
 
 	log.Infow("startup", "status", "initializing V1 API support")
@@ -215,6 +215,7 @@ func run(log *zap.SugaredLogger) error {
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	apiMux := handlers.APIMux(handlers.APIMuxConfig{
+		Build:    build,
 		Shutdown: shutdown,
 		Log:      log,
 		Auth:     auth,
@@ -238,7 +239,7 @@ func run(log *zap.SugaredLogger) error {
 		serverErrors <- api.ListenAndServe()
 	}()
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Shutdown
 
 	select {
@@ -263,16 +264,19 @@ func run(log *zap.SugaredLogger) error {
 
 // =============================================================================
 
-// startTracing configure open telemetry to be used with zipkin.
+// startTracing configure open telemetry to be used with Grafana Tempo.
 func startTracing(serviceName string, reporterURI string, probability float64) (*trace.TracerProvider, error) {
 
 	// WARNING: The current settings are using defaults which may not be
 	// compatible with your project. Please review the documentation for
 	// opentelemetry.
 
-	exporter, err := zipkin.New(
-		reporterURI,
-		// zipkin.WithLogger(zap.NewStdLog(log)),
+	exporter, err := otlptrace.New(
+		context.Background(),
+		otlptracegrpc.NewClient(
+			otlptracegrpc.WithInsecure(), // This should be configurable
+			otlptracegrpc.WithEndpoint(reporterURI),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating new exporter: %w", err)
@@ -289,7 +293,6 @@ func startTracing(serviceName string, reporterURI string, probability float64) (
 			resource.NewWithAttributes(
 				semconv.SchemaURL,
 				semconv.ServiceNameKey.String(serviceName),
-				attribute.String("exporter", "zipkin"),
 			),
 		),
 	)

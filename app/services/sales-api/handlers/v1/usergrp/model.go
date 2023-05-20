@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ardanlabs/service/business/core/user"
+	"github.com/ardanlabs/service/business/cview/user/summary"
 	"github.com/ardanlabs/service/business/sys/validate"
 )
 
@@ -22,22 +23,22 @@ type AppUser struct {
 	DateUpdated  string   `json:"dateUpdated"`
 }
 
-func toAppUser(core user.User) AppUser {
-	roles := make([]string, len(core.Roles))
-	for i, role := range core.Roles {
+func toAppUser(usr user.User) AppUser {
+	roles := make([]string, len(usr.Roles))
+	for i, role := range usr.Roles {
 		roles[i] = role.Name()
 	}
 
 	return AppUser{
-		ID:           core.ID.String(),
-		Name:         core.Name,
-		Email:        core.Email.Address,
+		ID:           usr.ID.String(),
+		Name:         usr.Name,
+		Email:        usr.Email.Address,
 		Roles:        roles,
-		PasswordHash: core.PasswordHash,
-		Department:   core.Department,
-		Enabled:      core.Enabled,
-		DateCreated:  core.DateCreated.Format(time.RFC3339),
-		DateUpdated:  core.DateUpdated.Format(time.RFC3339),
+		PasswordHash: usr.PasswordHash,
+		Department:   usr.Department,
+		Enabled:      usr.Enabled,
+		DateCreated:  usr.DateCreated.Format(time.RFC3339),
+		DateUpdated:  usr.DateUpdated.Format(time.RFC3339),
 	}
 }
 
@@ -68,7 +69,7 @@ func toCoreNewUser(app AppNewUser) (user.NewUser, error) {
 		return user.NewUser{}, fmt.Errorf("parsing email: %w", err)
 	}
 
-	core := user.NewUser{
+	usr := user.NewUser{
 		Name:            app.Name,
 		Email:           *addr,
 		Roles:           roles,
@@ -77,7 +78,7 @@ func toCoreNewUser(app AppNewUser) (user.NewUser, error) {
 		PasswordConfirm: app.PasswordConfirm,
 	}
 
-	return core, nil
+	return usr, nil
 }
 
 // Validate checks the data in the model is considered clean.
@@ -142,4 +143,23 @@ func (app AppUpdateUser) Validate() error {
 		return fmt.Errorf("validate: %w", err)
 	}
 	return nil
+}
+
+// =============================================================================
+
+// AppSummary represents information about an individual user and their products.
+type AppSummary struct {
+	UserID     string  `json:"userID"`
+	UserName   string  `json:"userName"`
+	TotalCount int     `json:"totalCount"`
+	TotalCost  float64 `json:"totalCost"`
+}
+
+func toAppSummary(smm summary.Summary) AppSummary {
+	return AppSummary{
+		UserID:     smm.UserID.String(),
+		UserName:   smm.UserName,
+		TotalCount: smm.TotalCount,
+		TotalCost:  smm.TotalCost,
+	}
 }

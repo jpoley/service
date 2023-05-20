@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ardanlabs/service/business/core/user"
+	"github.com/ardanlabs/service/business/cview/user/summary"
 	"github.com/ardanlabs/service/business/sys/validate"
 	"github.com/google/uuid"
 )
@@ -47,10 +48,34 @@ func parseFilter(r *http.Request) (user.QueryFilter, error) {
 		filter.WithEndCreatedDate(t)
 	}
 
-	filter.WithName(values.Get("name"))
+	if name := values.Get("name"); name != "" {
+		filter.WithName(name)
+	}
 
 	if err := filter.Validate(); err != nil {
 		return user.QueryFilter{}, err
+	}
+
+	return filter, nil
+}
+
+// =============================================================================
+
+func parseSummaryFilter(r *http.Request) (summary.QueryFilter, error) {
+	values := r.URL.Query()
+
+	var filter summary.QueryFilter
+
+	if userID := values.Get("user_id"); userID != "" {
+		id, err := uuid.Parse(userID)
+		if err != nil {
+			return summary.QueryFilter{}, validate.NewFieldsError("user_id", err)
+		}
+		filter.WithUserID(id)
+	}
+
+	if userName := values.Get("user_name"); userName != "" {
+		filter.WithUserName(userName)
 	}
 
 	return filter, nil

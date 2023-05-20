@@ -23,11 +23,11 @@ func parseFilter(r *http.Request) (product.QueryFilter, error) {
 	}
 
 	if cost := values.Get("cost"); cost != "" {
-		cst, err := strconv.ParseInt(cost, 10, 64)
+		cst, err := strconv.ParseFloat(cost, 64)
 		if err != nil {
 			return product.QueryFilter{}, validate.NewFieldsError("cost", err)
 		}
-		filter.WithCost(int(cst))
+		filter.WithCost(cst)
 	}
 
 	if quantity := values.Get("quantity"); quantity != "" {
@@ -38,7 +38,9 @@ func parseFilter(r *http.Request) (product.QueryFilter, error) {
 		filter.WithQuantity(int(qua))
 	}
 
-	filter.WithName(values.Get("name"))
+	if name := values.Get("name"); name != "" {
+		filter.WithName(name)
+	}
 
 	if err := filter.Validate(); err != nil {
 		return product.QueryFilter{}, err
