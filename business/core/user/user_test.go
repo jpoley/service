@@ -9,10 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ardanlabs/service/business/core/product"
 	"github.com/ardanlabs/service/business/core/user"
 	"github.com/ardanlabs/service/business/data/dbtest"
-	"github.com/ardanlabs/service/business/data/order"
 	"github.com/ardanlabs/service/foundation/docker"
 	"github.com/google/go-cmp/cmp"
 )
@@ -36,21 +34,45 @@ func Test_User(t *testing.T) {
 	t.Run("paging", paging)
 }
 
-// =============================================================================
-
 func crud(t *testing.T) {
-	seed := func(ctx context.Context, usrCore *user.Core, prdCore *product.Core) ([]user.User, error) {
-		usrs, err := usrCore.Query(ctx, user.QueryFilter{}, order.By{Field: user.OrderByName, Direction: order.ASC}, 1, 1)
-		if err != nil {
-			return nil, fmt.Errorf("seeding users : %w", err)
+	seed := func(ctx context.Context, usrCore *user.Core) ([]user.User, error) {
+		usrs := make([]user.User, 2)
+
+		nu1 := user.NewUser{
+			Name:            "Bill Kennedy",
+			Email:           mail.Address{Address: "bill@ardanlabs.com"},
+			Roles:           []user.Role{user.RoleAdmin},
+			Department:      "IT",
+			Password:        "12345",
+			PasswordConfirm: "12345",
 		}
+		usr1, err := usrCore.Create(ctx, nu1)
+		if err != nil {
+			return nil, fmt.Errorf("seeding user 1 : %w", err)
+		}
+
+		nu2 := user.NewUser{
+			Name:            "Ale Kennedy",
+			Email:           mail.Address{Address: "ale@ardanlabs.com"},
+			Roles:           []user.Role{user.RoleUser},
+			Department:      "IT",
+			Password:        "12345",
+			PasswordConfirm: "12345",
+		}
+		usr2, err := usrCore.Create(ctx, nu2)
+		if err != nil {
+			return nil, fmt.Errorf("seeding user 2 : %w", err)
+		}
+
+		usrs[0] = usr1
+		usrs[1] = usr2
 
 		return usrs, nil
 	}
 
 	// -------------------------------------------------------------------------
 
-	test := dbtest.NewTest(t, c)
+	test := dbtest.NewTest(t, c, "Test_User/crud")
 	defer func() {
 		if r := recover(); r != nil {
 			t.Log(r)
@@ -66,7 +88,7 @@ func crud(t *testing.T) {
 
 	t.Log("Go seeding ...")
 
-	usrs, err := seed(ctx, api.User, api.Product)
+	usrs, err := seed(ctx, api.User)
 	if err != nil {
 		t.Fatalf("Seeding error: %s", err)
 	}
@@ -146,6 +168,8 @@ func crud(t *testing.T) {
 		t.Errorf("Should be able to see updates to Department")
 	}
 
+	// -------------------------------------------------------------------------
+
 	if err := api.User.Delete(ctx, saved); err != nil {
 		t.Fatalf("Should be able to delete user : %s.", err)
 	}
@@ -157,7 +181,7 @@ func crud(t *testing.T) {
 }
 
 func paging(t *testing.T) {
-	test := dbtest.NewTest(t, c)
+	test := dbtest.NewTest(t, c, "Test_User/paging")
 	defer func() {
 		if r := recover(); r != nil {
 			t.Log(r)
@@ -173,7 +197,7 @@ func paging(t *testing.T) {
 
 	// -------------------------------------------------------------------------
 
-	name := "User Gopher"
+	name := "Ale Kennedy"
 	users1, err := api.User.Query(ctx, user.QueryFilter{Name: &name}, user.DefaultOrderBy, 1, 1)
 	if err != nil {
 		t.Fatalf("Should be able to retrieve user %q : %s.", name, err)
@@ -188,7 +212,7 @@ func paging(t *testing.T) {
 		t.Errorf("Should have a single user for %q", name)
 	}
 
-	name = "Admin Gopher"
+	name = "Bill Kennedy"
 	users2, err := api.User.Query(ctx, user.QueryFilter{Name: &name}, user.DefaultOrderBy, 1, 1)
 	if err != nil {
 		t.Fatalf("Should be able to retrieve user %q : %s.", name, err)

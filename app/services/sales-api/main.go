@@ -13,49 +13,63 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
-	"github.com/ardanlabs/service/app/services/sales-api/handlers"
-	database "github.com/ardanlabs/service/business/sys/database/pgx"
-	"github.com/ardanlabs/service/business/web/auth"
+	"github.com/ardanlabs/service/app/services/sales-api/v1/build/all"
+	"github.com/ardanlabs/service/app/services/sales-api/v1/build/crud"
+	"github.com/ardanlabs/service/app/services/sales-api/v1/build/reporting"
+	"github.com/ardanlabs/service/business/data/sqldb"
+	"github.com/ardanlabs/service/business/web/v1/auth"
 	"github.com/ardanlabs/service/business/web/v1/debug"
+	"github.com/ardanlabs/service/business/web/v1/mux"
+	"github.com/ardanlabs/service/foundation/keystore"
 	"github.com/ardanlabs/service/foundation/logger"
-	"github.com/ardanlabs/service/foundation/vault"
+	"github.com/ardanlabs/service/foundation/web"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
-	"go.uber.org/zap"
 )
 
 /*
 	Need to figure out timeouts for http service.
-	Add Category field and type to product.
 */
 
 var build = "develop"
+var routes = "all" // go build -ldflags "-X main.routes=crud"
 
 func main() {
-	log, err := logger.New("SALES-API")
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	defer log.Sync()
+	var log *logger.Logger
 
-	if err := run(log); err != nil {
-		log.Errorw("startup", "ERROR", err)
-		log.Sync()
+	events := logger.Events{
+		Error: func(ctx context.Context, r logger.Record) {
+			log.Info(ctx, "******* SEND ALERT ******")
+		},
+	}
+
+	traceIDFn := func(ctx context.Context) string {
+		return web.GetTraceID(ctx)
+	}
+
+	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "SALES-API", traceIDFn, events)
+
+	// -------------------------------------------------------------------------
+
+	ctx := context.Background()
+
+	if err := run(ctx, log); err != nil {
+		log.Error(ctx, "startup", "msg", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *zap.SugaredLogger) error {
+func run(ctx context.Context, log *logger.Logger) error {
 
 	// -------------------------------------------------------------------------
 	// GOMAXPROCS
 
-	log.Infow("startup", "GOMAXPROCS", runtime.GOMAXPROCS(0))
+	log.Info(ctx, "startup", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 
 	// -------------------------------------------------------------------------
 	// Configuration
@@ -63,27 +77,23 @@ func run(log *zap.SugaredLogger) error {
 	cfg := struct {
 		conf.Version
 		Web struct {
-			ReadTimeout     time.Duration `conf:"default:5s"`
-			WriteTimeout    time.Duration `conf:"default:10s"`
-			IdleTimeout     time.Duration `conf:"default:120s"`
-			ShutdownTimeout time.Duration `conf:"default:20s"`
-			APIHost         string        `conf:"default:0.0.0.0:3000"`
-			DebugHost       string        `conf:"default:0.0.0.0:4000"`
+			ReadTimeout        time.Duration `conf:"default:5s"`
+			WriteTimeout       time.Duration `conf:"default:10s"`
+			IdleTimeout        time.Duration `conf:"default:120s"`
+			ShutdownTimeout    time.Duration `conf:"default:20s"`
+			APIHost            string        `conf:"default:0.0.0.0:3000"`
+			DebugHost          string        `conf:"default:0.0.0.0:4000"`
+			CORSAllowedOrigins []string      `conf:"default:*"`
 		}
 		Auth struct {
-			// KeysFolder string `conf:"default:zarf/keys/"`
-			// ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
-			Issuer string `conf:"default:service project"`
-		}
-		Vault struct {
-			Address   string `conf:"default:http://vault-service.sales-system.svc.cluster.local:8200"`
-			MountPath string `conf:"default:secret"`
-			Token     string `conf:"default:mytoken,mask"`
+			KeysFolder string `conf:"default:zarf/keys/"`
+			ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
+			Issuer     string `conf:"default:service project"`
 		}
 		DB struct {
 			User         string `conf:"default:postgres"`
 			Password     string `conf:"default:postgres,mask"`
-			Host         string `conf:"default:database-service.sales-system.svc.cluster.local"`
+			HostPort     string `conf:"default:database-service.sales-system.svc.cluster.local"`
 			Name         string `conf:"default:postgres"`
 			MaxIdleConns int    `conf:"default:2"`
 			MaxOpenConns int    `conf:"default:0"`
@@ -92,12 +102,15 @@ func run(log *zap.SugaredLogger) error {
 		Tempo struct {
 			ReporterURI string  `conf:"default:tempo.sales-system.svc.cluster.local:4317"`
 			ServiceName string  `conf:"default:sales-api"`
-			Probability float64 `conf:"default:1"` // Shouldn't use a high value in non-developer systems. 0.05 should be enough for most systems. Some might want to have this even lower
+			Probability float64 `conf:"default:0.05"`
+			// Shouldn't use a high Probability value in non-developer systems.
+			// 0.05 should be enough for most systems. Some might want to have
+			// this even lower.
 		}
 	}{
 		Version: conf.Version{
 			Build: build,
-			Desc:  "copyright information here",
+			Desc:  "Service Project",
 		},
 	}
 
@@ -114,26 +127,26 @@ func run(log *zap.SugaredLogger) error {
 	// -------------------------------------------------------------------------
 	// App Starting
 
-	log.Infow("starting service", "version", build)
-	defer log.Infow("shutdown complete")
+	log.Info(ctx, "starting service", "version", build)
+	defer log.Info(ctx, "shutdown complete")
 
 	out, err := conf.String(&cfg)
 	if err != nil {
 		return fmt.Errorf("generating config for output: %w", err)
 	}
-	log.Infow("startup", "config", out)
+	log.Info(ctx, "startup", "config", out)
 
 	expvar.NewString("build").Set(build)
 
 	// -------------------------------------------------------------------------
 	// Database Support
 
-	log.Infow("startup", "status", "initializing database support", "host", cfg.DB.Host)
+	log.Info(ctx, "startup", "status", "initializing database support", "hostport", cfg.DB.HostPort)
 
-	db, err := database.Open(database.Config{
+	db, err := sqldb.Open(sqldb.Config{
 		User:         cfg.DB.User,
 		Password:     cfg.DB.Password,
-		Host:         cfg.DB.Host,
+		HostPort:     cfg.DB.HostPort,
 		Name:         cfg.DB.Name,
 		MaxIdleConns: cfg.DB.MaxIdleConns,
 		MaxOpenConns: cfg.DB.MaxOpenConns,
@@ -143,34 +156,27 @@ func run(log *zap.SugaredLogger) error {
 		return fmt.Errorf("connecting to db: %w", err)
 	}
 	defer func() {
-		log.Infow("shutdown", "status", "stopping database support", "host", cfg.DB.Host)
+		log.Info(ctx, "shutdown", "status", "stopping database support", "hostport", cfg.DB.HostPort)
 		db.Close()
 	}()
 
 	// -------------------------------------------------------------------------
 	// Initialize authentication support
 
-	log.Infow("startup", "status", "initializing authentication support")
+	log.Info(ctx, "startup", "status", "initializing authentication support")
 
-	// Simple keystore versus using Vault.
-	// ks, err := keystore.NewFS(os.DirFS(cfg.Auth.KeysFolder))
-	// if err != nil {
-	// 	return fmt.Errorf("reading keys: %w", err)
-	// }
-
-	vault, err := vault.New(vault.Config{
-		Address:   cfg.Vault.Address,
-		Token:     cfg.Vault.Token,
-		MountPath: cfg.Vault.MountPath,
-	})
-	if err != nil {
-		return fmt.Errorf("constructing vault: %w", err)
+	// Load the private keys files from disk. We can assume some system like
+	// Vault has created these files already. How that happens is not our
+	// concern.
+	ks := keystore.New()
+	if err := ks.LoadRSAKeys(os.DirFS(cfg.Auth.KeysFolder)); err != nil {
+		return fmt.Errorf("reading keys: %w", err)
 	}
 
 	authCfg := auth.Config{
 		Log:       log,
 		DB:        db,
-		KeyLookup: vault,
+		KeyLookup: ks,
 	}
 
 	auth, err := auth.New(authCfg)
@@ -181,7 +187,7 @@ func run(log *zap.SugaredLogger) error {
 	// -------------------------------------------------------------------------
 	// Start Tracing Support
 
-	log.Infow("startup", "status", "initializing OT/Tempo tracing support")
+	log.Info(ctx, "startup", "status", "initializing OT/Tempo tracing support")
 
 	traceProvider, err := startTracing(
 		cfg.Tempo.ServiceName,
@@ -198,44 +204,45 @@ func run(log *zap.SugaredLogger) error {
 	// -------------------------------------------------------------------------
 	// Start Debug Service
 
-	log.Infow("startup", "status", "debug v1 router started", "host", cfg.Web.DebugHost)
-
 	go func() {
+		log.Info(ctx, "startup", "status", "debug v1 router started", "host", cfg.Web.DebugHost)
+
 		if err := http.ListenAndServe(cfg.Web.DebugHost, debug.Mux()); err != nil {
-			log.Errorw("shutdown", "status", "debug v1 router closed", "host", cfg.Web.DebugHost, "ERROR", err)
+			log.Error(ctx, "shutdown", "status", "debug v1 router closed", "host", cfg.Web.DebugHost, "msg", err)
 		}
 	}()
 
 	// -------------------------------------------------------------------------
 	// Start API Service
 
-	log.Infow("startup", "status", "initializing V1 API support")
+	log.Info(ctx, "startup", "status", "initializing V1 API support")
 
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
-	apiMux := handlers.APIMux(handlers.APIMuxConfig{
+	cfgMux := mux.Config{
 		Build:    build,
 		Shutdown: shutdown,
 		Log:      log,
 		Auth:     auth,
 		DB:       db,
 		Tracer:   tracer,
-	})
+	}
 
 	api := http.Server{
 		Addr:         cfg.Web.APIHost,
-		Handler:      apiMux,
+		Handler:      mux.WebAPI(cfgMux, buildRoutes(), mux.WithCORS(cfg.Web.CORSAllowedOrigins)),
 		ReadTimeout:  cfg.Web.ReadTimeout,
 		WriteTimeout: cfg.Web.WriteTimeout,
 		IdleTimeout:  cfg.Web.IdleTimeout,
-		ErrorLog:     zap.NewStdLog(log.Desugar()),
+		ErrorLog:     logger.NewStdLogger(log, logger.LevelError),
 	}
 
 	serverErrors := make(chan error, 1)
 
 	go func() {
-		log.Infow("startup", "status", "api router started", "host", api.Addr)
+		log.Info(ctx, "startup", "status", "api router started", "host", api.Addr)
+
 		serverErrors <- api.ListenAndServe()
 	}()
 
@@ -247,10 +254,10 @@ func run(log *zap.SugaredLogger) error {
 		return fmt.Errorf("server error: %w", err)
 
 	case sig := <-shutdown:
-		log.Infow("shutdown", "status", "shutdown started", "signal", sig)
-		defer log.Infow("shutdown", "status", "shutdown complete", "signal", sig)
+		log.Info(ctx, "shutdown", "status", "shutdown started", "signal", sig)
+		defer log.Info(ctx, "shutdown", "status", "shutdown complete", "signal", sig)
 
-		ctx, cancel := context.WithTimeout(context.Background(), cfg.Web.ShutdownTimeout)
+		ctx, cancel := context.WithTimeout(ctx, cfg.Web.ShutdownTimeout)
 		defer cancel()
 
 		if err := api.Shutdown(ctx); err != nil {
@@ -262,7 +269,29 @@ func run(log *zap.SugaredLogger) error {
 	return nil
 }
 
-// =============================================================================
+func buildRoutes() mux.RouteAdder {
+
+	// The idea here is that we can build different versions of the binary
+	// with different sets of exposed web APIs. By default we build a single
+	// an instance with all the web APIs.
+	//
+	// Here is the scenario. It would be nice to build two binaries, one for the
+	// transactional APIs (CRUD) and one for the reporting APIs. This would allow
+	// the system to run two instances of the database. One instance tuned for the
+	// transactional database calls and the other tuned for the reporting calls.
+	// Tuning meaning indexing and memory requirements. The two databases can be
+	// kept in sync with replication.
+
+	switch routes {
+	case "crud":
+		return crud.Routes()
+
+	case "reporting":
+		return reporting.Routes()
+	}
+
+	return all.Routes()
+}
 
 // startTracing configure open telemetry to be used with Grafana Tempo.
 func startTracing(serviceName string, reporterURI string, probability float64) (*trace.TracerProvider, error) {
@@ -301,6 +330,13 @@ func startTracing(serviceName string, reporterURI string, probability float64) (
 	// but we pass this provider around the program where needed to collect
 	// our traces.
 	otel.SetTracerProvider(traceProvider)
+
+	// Chooses the HTTP header formats we extract incoming trace contexts from,
+	// and the headers we set in outgoing requests.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
 	return traceProvider, nil
 }

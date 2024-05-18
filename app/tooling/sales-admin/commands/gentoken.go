@@ -3,27 +3,28 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ardanlabs/service/business/core/event"
 	"github.com/ardanlabs/service/business/core/user"
 	"github.com/ardanlabs/service/business/core/user/stores/userdb"
-	database "github.com/ardanlabs/service/business/sys/database/pgx"
-	"github.com/ardanlabs/service/business/web/auth"
-	"github.com/ardanlabs/service/foundation/vault"
+	"github.com/ardanlabs/service/business/data/sqldb"
+	"github.com/ardanlabs/service/business/web/v1/auth"
+	"github.com/ardanlabs/service/foundation/keystore"
+	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 // GenToken generates a JWT for the specified user.
-func GenToken(log *zap.SugaredLogger, dbConfig database.Config, vaultConfig vault.Config, userID uuid.UUID, kid string) error {
+func GenToken(log *logger.Logger, dbConfig sqldb.Config, keyPath string, userID uuid.UUID, kid string) error {
 	if kid == "" {
 		fmt.Println("help: gentoken <user_id> <kid>")
 		return ErrHelp
 	}
 
-	db, err := database.Open(dbConfig)
+	db, err := sqldb.Open(dbConfig)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
 	}
@@ -33,22 +34,22 @@ func GenToken(log *zap.SugaredLogger, dbConfig database.Config, vaultConfig vaul
 	defer cancel()
 
 	evnCore := event.NewCore(log)
-	core := user.NewCore(evnCore, userdb.NewStore(log, db))
+	core := user.NewCore(log, evnCore, userdb.NewStore(log, db))
 
 	usr, err := core.QueryByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("retrieve user: %w", err)
 	}
 
-	vault, err := vault.New(vaultConfig)
-	if err != nil {
-		return fmt.Errorf("new keystore: %w", err)
+	ks := keystore.New()
+	if err := ks.LoadRSAKeys(os.DirFS(keyPath)); err != nil {
+		return fmt.Errorf("reading keys: %w", err)
 	}
 
 	authCfg := auth.Config{
 		Log:       log,
 		DB:        db,
-		KeyLookup: vault,
+		KeyLookup: ks,
 	}
 
 	a, err := auth.New(authCfg)

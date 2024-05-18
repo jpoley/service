@@ -11,13 +11,13 @@ import (
 	"github.com/ardanlabs/service/business/core/event"
 	"github.com/ardanlabs/service/business/core/user"
 	"github.com/ardanlabs/service/business/core/user/stores/userdb"
-	database "github.com/ardanlabs/service/business/sys/database/pgx"
-	"go.uber.org/zap"
+	"github.com/ardanlabs/service/business/data/sqldb"
+	"github.com/ardanlabs/service/foundation/logger"
 )
 
 // Users retrieves all users from the database.
-func Users(log *zap.SugaredLogger, cfg database.Config, pageNumber string, rowsPerPage string) error {
-	db, err := database.Open(cfg)
+func Users(log *logger.Logger, cfg sqldb.Config, pageNumber string, rowsPerPage string) error {
+	db, err := sqldb.Open(cfg)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
 	}
@@ -37,7 +37,7 @@ func Users(log *zap.SugaredLogger, cfg database.Config, pageNumber string, rowsP
 	}
 
 	evnCore := event.NewCore(log)
-	core := user.NewCore(evnCore, userdb.NewStore(log, db))
+	core := user.NewCore(log, evnCore, userdb.NewStore(log, db))
 
 	users, err := core.Query(ctx, user.QueryFilter{}, user.DefaultOrderBy, page, rows)
 	if err != nil {

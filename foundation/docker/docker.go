@@ -13,18 +13,19 @@ import (
 
 // Container tracks information about the docker container started for tests.
 type Container struct {
-	ID   string
-	Host string // IP:Port
+	ID       string
+	HostPort string
 }
 
 // StartContainer starts the specified container for running tests.
-func StartContainer(image string, port string, args ...string) (*Container, error) {
+func StartContainer(image string, port string, dockerArgs []string, appArgs []string) (*Container, error) {
 	arg := []string{"run", "-P", "-d"}
-	arg = append(arg, args...)
+	arg = append(arg, dockerArgs...)
 	arg = append(arg, image)
+	arg = append(arg, appArgs...)
 
-	cmd := exec.Command("docker", arg...)
 	var out bytes.Buffer
+	cmd := exec.Command("docker", arg...)
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("could not start container %s: %w", image, err)
@@ -38,8 +39,8 @@ func StartContainer(image string, port string, args ...string) (*Container, erro
 	}
 
 	c := Container{
-		ID:   id,
-		Host: net.JoinHostPort(hostIP, hostPort),
+		ID:       id,
+		HostPort: net.JoinHostPort(hostIP, hostPort),
 	}
 
 	return &c, nil
@@ -64,14 +65,15 @@ func DumpContainerLogs(id string) []byte {
 	if err != nil {
 		return nil
 	}
+
 	return out
 }
 
 func extractIPPort(id string, port string) (hostIP string, hostPort string, err error) {
 	tmpl := fmt.Sprintf("[{{range $k,$v := (index .NetworkSettings.Ports \"%s/tcp\")}}{{json $v}}{{end}}]", port)
 
-	cmd := exec.Command("docker", "inspect", "-f", tmpl, id)
 	var out bytes.Buffer
+	cmd := exec.Command("docker", "inspect", "-f", tmpl, id)
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
 		return "", "", fmt.Errorf("could not inspect container %s: %w", id, err)

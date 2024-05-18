@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"expvar"
 	"fmt"
@@ -16,33 +17,41 @@ import (
 	"github.com/ardanlabs/service/app/services/metrics/collector"
 	"github.com/ardanlabs/service/app/services/metrics/publisher"
 	expvarsrv "github.com/ardanlabs/service/app/services/metrics/publisher/expvar"
+	prometheussrv "github.com/ardanlabs/service/app/services/metrics/publisher/prometheus"
 	"github.com/ardanlabs/service/foundation/logger"
-	"go.uber.org/zap"
 )
 
 var build = "develop"
 
 func main() {
-	log, err := logger.New("METRICS")
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	defer log.Sync()
+	var log *logger.Logger
 
-	if err := run(log); err != nil {
-		log.Errorw("startup", "ERROR", err)
-		log.Sync()
+	events := logger.Events{
+		Error: func(ctx context.Context, r logger.Record) { log.Info(ctx, "******* SEND ALERT ******") },
+	}
+
+	traceIDFn := func(ctx context.Context) string {
+		return "00000000-0000-0000-0000-000000000000"
+	}
+
+	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "METRICS", traceIDFn, events)
+
+	// -------------------------------------------------------------------------
+
+	ctx := context.Background()
+
+	if err := run(ctx, log); err != nil {
+		log.Error(ctx, "startup", "msg", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *zap.SugaredLogger) error {
+func run(ctx context.Context, log *logger.Logger) error {
 
 	// -------------------------------------------------------------------------
 	// GOMAXPROCS
 
-	log.Infow("startup", "GOMAXPROCS", runtime.GOMAXPROCS(0))
+	log.Info(ctx, "startup", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 
 	// -------------------------------------------------------------------------
 	// Configuration
@@ -54,6 +63,14 @@ func run(log *zap.SugaredLogger) error {
 		}
 		Expvar struct {
 			Host            string        `conf:"default:0.0.0.0:3001"`
+			Route           string        `conf:"default:/metrics"`
+			ReadTimeout     time.Duration `conf:"default:5s"`
+			WriteTimeout    time.Duration `conf:"default:10s"`
+			IdleTimeout     time.Duration `conf:"default:120s"`
+			ShutdownTimeout time.Duration `conf:"default:5s"`
+		}
+		Prometheus struct {
+			Host            string        `conf:"default:0.0.0.0:3002"`
 			Route           string        `conf:"default:/metrics"`
 			ReadTimeout     time.Duration `conf:"default:5s"`
 			WriteTimeout    time.Duration `conf:"default:10s"`
@@ -87,19 +104,19 @@ func run(log *zap.SugaredLogger) error {
 	// -------------------------------------------------------------------------
 	// App Starting
 
-	log.Infow("starting service", "version", build)
-	defer log.Infow("shutdown complete")
+	log.Info(ctx, "starting service", "version", build)
+	defer log.Info(ctx, "shutdown complete")
 
 	out, err := conf.String(&cfg)
 	if err != nil {
 		return fmt.Errorf("generating config for output: %w", err)
 	}
-	log.Infow("startup", "config", out)
+	log.Info(ctx, "startup", "config", out)
 
 	// -------------------------------------------------------------------------
 	// Start Debug Service
 
-	log.Infow("startup", "status", "debug router started", "host", cfg.Web.DebugHost)
+	log.Info(ctx, "startup", "status", "debug router started", "host", cfg.Web.DebugHost)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -111,9 +128,15 @@ func run(log *zap.SugaredLogger) error {
 
 	go func() {
 		if err := http.ListenAndServe(cfg.Web.DebugHost, mux); err != nil {
-			log.Errorw("shutdown", "status", "debug router closed", "host", cfg.Web.DebugHost, "ERROR", err)
+			log.Error(ctx, "shutdown", "status", "debug router closed", "host", cfg.Web.DebugHost, "msg", err)
 		}
 	}()
+
+	// -------------------------------------------------------------------------
+	// Start Prometheus Service
+
+	prom := prometheussrv.New(log, cfg.Prometheus.Host, cfg.Prometheus.Route, cfg.Prometheus.ReadTimeout, cfg.Prometheus.WriteTimeout, cfg.Prometheus.IdleTimeout)
+	defer prom.Stop(cfg.Prometheus.ShutdownTimeout)
 
 	// -------------------------------------------------------------------------
 	// Start expvar Service
@@ -131,7 +154,7 @@ func run(log *zap.SugaredLogger) error {
 
 	stdout := publisher.NewStdout(log)
 
-	publish, err := publisher.New(log, collector, cfg.Publish.Interval, exp.Publish, stdout.Publish)
+	publish, err := publisher.New(log, collector, cfg.Publish.Interval, prom.Publish, exp.Publish, stdout.Publish)
 	if err != nil {
 		return fmt.Errorf("starting publisher: %w", err)
 	}
@@ -144,8 +167,8 @@ func run(log *zap.SugaredLogger) error {
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 	<-shutdown
 
-	log.Infow("shutdown", "status", "shutdown started")
-	defer log.Infow("shutdown", "status", "shutdown complete")
+	log.Info(ctx, "shutdown", "status", "shutdown started")
+	defer log.Info(ctx, "shutdown", "status", "shutdown complete")
 
 	return nil
 }

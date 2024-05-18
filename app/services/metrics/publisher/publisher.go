@@ -2,11 +2,12 @@
 package publisher
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/ardanlabs/service/foundation/logger"
 )
 
 // Set of possible publisher types.
@@ -15,15 +16,11 @@ const (
 	TypeDatadog = "datadog"
 )
 
-// =============================================================================
-
 // Collector defines a contract a collector must support
 // so a consumer can retrieve metrics.
 type Collector interface {
 	Collect() (map[string]any, error)
 }
-
-// =============================================================================
 
 // Publisher defines a handler function that will be called
 // on each interval.
@@ -32,7 +29,7 @@ type Publisher func(map[string]any)
 // Publish provides the ability to receive metrics
 // on an interval.
 type Publish struct {
-	log       *zap.SugaredLogger
+	log       *logger.Logger
 	collector Collector
 	publisher []Publisher
 	wg        sync.WaitGroup
@@ -41,7 +38,7 @@ type Publish struct {
 }
 
 // New creates a Publish for consuming and publishing metrics.
-func New(log *zap.SugaredLogger, collector Collector, interval time.Duration, publisher ...Publisher) (*Publish, error) {
+func New(log *logger.Logger, collector Collector, interval time.Duration, publisher ...Publisher) (*Publish, error) {
 	p := Publish{
 		log:       log,
 		collector: collector,
@@ -77,7 +74,7 @@ func (p *Publish) Stop() {
 func (p *Publish) update() {
 	data, err := p.collector.Collect()
 	if err != nil {
-		p.log.Errorw("publish", "status", "collect data", "ERROR", err)
+		p.log.Error(context.Background(), "publish", "status", "collect data", "msg", err)
 		return
 	}
 
@@ -86,29 +83,29 @@ func (p *Publish) update() {
 	}
 }
 
-// =============================================================================
-
 // Stdout provide our basic publishing.
 type Stdout struct {
-	log *zap.SugaredLogger
+	log *logger.Logger
 }
 
 // NewStdout initializes stdout for publishing metrics.
-func NewStdout(log *zap.SugaredLogger) *Stdout {
+func NewStdout(log *logger.Logger) *Stdout {
 	return &Stdout{log}
 }
 
 // Publish publishers for writing to stdout.
 func (s *Stdout) Publish(data map[string]any) {
+	ctx := context.Background()
+
 	rawJSON, err := json.Marshal(data)
 	if err != nil {
-		s.log.Errorw("stdout", "status", "marshal data", "ERROR", err)
+		s.log.Error(ctx, "stdout", "status", "marshal data", "msg", err)
 		return
 	}
 
 	var d map[string]any
 	if err := json.Unmarshal(rawJSON, &d); err != nil {
-		s.log.Errorw("stdout", "status", "unmarshal data", "ERROR", err)
+		s.log.Error(ctx, "stdout", "status", "unmarshal data", "msg", err)
 		return
 	}
 
@@ -126,5 +123,5 @@ func (s *Stdout) Publish(data map[string]any) {
 	if err != nil {
 		return
 	}
-	s.log.Infow("stdout", "data", string(out))
+	s.log.Info(ctx, "stdout", "data", string(out))
 }

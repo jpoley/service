@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	"github.com/ardanlabs/service/business/web/metrics"
+	"github.com/ardanlabs/service/business/web/v1/metrics"
 	"github.com/ardanlabs/service/foundation/web"
 )
 
 // Panics recovers from panics and converts the panic to an error so it is
 // reported in Metrics and handled in Errors.
-func Panics() web.Middleware {
+func Panics() web.MidHandler {
 	m := func(handler web.Handler) web.Handler {
 		h := func(ctx context.Context, w http.ResponseWriter, r *http.Request) (err error) {
 

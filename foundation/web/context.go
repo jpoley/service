@@ -6,6 +6,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 type ctxKey int
@@ -26,7 +27,7 @@ func GetValues(ctx context.Context) *Values {
 	if !ok {
 		return &Values{
 			TraceID: "00000000-0000-0000-0000-000000000000",
-			Tracer:  trace.NewNoopTracerProvider().Tracer(""),
+			Tracer:  noop.NewTracerProvider().Tracer(""),
 			Now:     time.Now(),
 		}
 	}
@@ -40,6 +41,7 @@ func GetTraceID(ctx context.Context) string {
 	if !ok {
 		return "00000000-0000-0000-0000-000000000000"
 	}
+
 	return v.TraceID
 }
 
@@ -49,6 +51,7 @@ func GetTime(ctx context.Context) time.Time {
 	if !ok {
 		return time.Now()
 	}
+
 	return v.Now
 }
 
@@ -67,12 +70,15 @@ func AddSpan(ctx context.Context, spanName string, keyValues ...attribute.KeyVal
 	return ctx, span
 }
 
-// SetStatusCode sets the status code back into the context.
-func SetStatusCode(ctx context.Context, statusCode int) {
+func setStatusCode(ctx context.Context, statusCode int) {
 	v, ok := ctx.Value(key).(*Values)
 	if !ok {
 		return
 	}
 
 	v.StatusCode = statusCode
+}
+
+func setValues(ctx context.Context, v *Values) context.Context {
+	return context.WithValue(ctx, key, v)
 }

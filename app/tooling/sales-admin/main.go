@@ -2,16 +2,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/ardanlabs/conf/v3"
 	"github.com/ardanlabs/service/app/tooling/sales-admin/commands"
-	database "github.com/ardanlabs/service/business/sys/database/pgx"
-	"github.com/ardanlabs/service/foundation/vault"
+	"github.com/ardanlabs/service/business/data/sqldb"
+	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 var build = "develop"
@@ -22,30 +23,30 @@ type config struct {
 	DB   struct {
 		User         string `conf:"default:postgres"`
 		Password     string `conf:"default:postgres,mask"`
-		Host         string `conf:"default:database-service.sales-system.svc.cluster.local"`
+		HostPort     string `conf:"default:database-service.sales-system.svc.cluster.local"`
 		Name         string `conf:"default:postgres"`
 		MaxIdleConns int    `conf:"default:2"`
 		MaxOpenConns int    `conf:"default:0"`
 		DisableTLS   bool   `conf:"default:true"`
 	}
-	Vault struct {
+	Auth struct {
 		KeysFolder string `conf:"default:zarf/keys/"`
-		Address    string `conf:"default:http://vault-service.sales-system.svc.cluster.local:8200"`
-		Token      string `conf:"default:mytoken,mask"`
-		MountPath  string `conf:"default:secret"`
+		DefaultKID string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
 	}
 }
 
 func main() {
-	if err := run(zap.NewNop().Sugar()); err != nil {
+	log := logger.New(io.Discard, logger.LevelInfo, "ADMIN", func(context.Context) string { return "00000000-0000-0000-0000-000000000000" })
+
+	if err := run(log); err != nil {
 		if !errors.Is(err, commands.ErrHelp) {
-			fmt.Println("ERROR", err)
+			fmt.Println("msg", err)
 		}
 		os.Exit(1)
 	}
 }
 
-func run(log *zap.SugaredLogger) error {
+func run(log *logger.Logger) error {
 	cfg := config{
 		Version: conf.Version{
 			Build: build,
@@ -65,7 +66,7 @@ func run(log *zap.SugaredLogger) error {
 		if err != nil {
 			return fmt.Errorf("generating config for output: %w", err)
 		}
-		log.Infow("startup", "config", out)
+		log.Info(context.Background(), "startup", "config", out)
 
 		return fmt.Errorf("parsing config: %w", err)
 	}
@@ -75,30 +76,37 @@ func run(log *zap.SugaredLogger) error {
 
 // processCommands handles the execution of the commands specified on
 // the command line.
-func processCommands(args conf.Args, log *zap.SugaredLogger, cfg config) error {
-	dbConfig := database.Config{
+func processCommands(args conf.Args, log *logger.Logger, cfg config) error {
+	dbConfig := sqldb.Config{
 		User:         cfg.DB.User,
 		Password:     cfg.DB.Password,
-		Host:         cfg.DB.Host,
+		HostPort:     cfg.DB.HostPort,
 		Name:         cfg.DB.Name,
 		MaxIdleConns: cfg.DB.MaxIdleConns,
 		MaxOpenConns: cfg.DB.MaxOpenConns,
 		DisableTLS:   cfg.DB.DisableTLS,
 	}
 
-	vaultConfig := vault.Config{
-		Address:   cfg.Vault.Address,
-		Token:     cfg.Vault.Token,
-		MountPath: cfg.Vault.MountPath,
-	}
-
 	switch args.Num(0) {
+	case "domain":
+		if err := commands.Domain(args.Num(1)); err != nil {
+			return fmt.Errorf("adding domain: %w", err)
+		}
+
 	case "migrate":
 		if err := commands.Migrate(dbConfig); err != nil {
 			return fmt.Errorf("migrating database: %w", err)
 		}
 
 	case "seed":
+		if err := commands.Seed(dbConfig); err != nil {
+			return fmt.Errorf("seeding database: %w", err)
+		}
+
+	case "migrate-seed":
+		if err := commands.Migrate(dbConfig); err != nil {
+			return fmt.Errorf("migrating database: %w", err)
+		}
 		if err := commands.Seed(dbConfig); err != nil {
 			return fmt.Errorf("seeding database: %w", err)
 		}
@@ -129,29 +137,21 @@ func processCommands(args conf.Args, log *zap.SugaredLogger, cfg config) error {
 			return fmt.Errorf("generating token: %w", err)
 		}
 		kid := args.Num(2)
-		if err := commands.GenToken(log, dbConfig, vaultConfig, userID, kid); err != nil {
+		if kid == "" {
+			kid = cfg.Auth.DefaultKID
+		}
+		if err := commands.GenToken(log, dbConfig, cfg.Auth.KeysFolder, userID, kid); err != nil {
 			return fmt.Errorf("generating token: %w", err)
 		}
 
-	case "vault":
-		if err := commands.Vault(vaultConfig, cfg.Vault.KeysFolder); err != nil {
-			return fmt.Errorf("setting private key: %w", err)
-		}
-
-	case "vault-init":
-		if err := commands.VaultInit(vaultConfig); err != nil {
-			return fmt.Errorf("initializing vault instance: %w", err)
-		}
-
 	default:
+		fmt.Println("domain:     add a new domain to the project")
 		fmt.Println("migrate:    create the schema in the database")
 		fmt.Println("seed:       add data to the database")
 		fmt.Println("useradd:    add a new user to the database")
 		fmt.Println("users:      get a list of users from the database")
 		fmt.Println("genkey:     generate a set of private/public key files")
 		fmt.Println("gentoken:   generate a JWT for a user with claims")
-		fmt.Println("vault:      load private keys into vault system")
-		fmt.Println("vault-init: initialize a new vault instance")
 		fmt.Println("provide a command to get more help.")
 		return commands.ErrHelp
 	}

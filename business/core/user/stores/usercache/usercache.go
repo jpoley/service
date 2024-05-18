@@ -7,31 +7,33 @@ import (
 	"sync"
 
 	"github.com/ardanlabs/service/business/core/user"
-	"github.com/ardanlabs/service/business/data/order"
+	"github.com/ardanlabs/service/business/data/transaction"
+	"github.com/ardanlabs/service/business/web/v1/order"
+	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 // Store manages the set of APIs for user data and caching.
 type Store struct {
-	log    *zap.SugaredLogger
+	log    *logger.Logger
 	storer user.Storer
-	cache  map[string]*user.User
+	cache  map[string]user.User
 	mu     sync.RWMutex
 }
 
 // NewStore constructs the api for data and caching access.
-func NewStore(log *zap.SugaredLogger, storer user.Storer) *Store {
+func NewStore(log *logger.Logger, storer user.Storer) *Store {
 	return &Store{
 		log:    log,
 		storer: storer,
-		cache:  map[string]*user.User{},
+		cache:  map[string]user.User{},
 	}
 }
 
-// WithinTran runs passed function and do commit/rollback at the end.
-func (s *Store) WithinTran(ctx context.Context, fn func(s user.Storer) error) error {
-	return s.storer.WithinTran(ctx, fn)
+// ExecuteUnderTransaction constructs a new Store value replacing the sqlx DB
+// value with a sqlx DB value that is currently inside a transaction.
+func (s *Store) ExecuteUnderTransaction(tx transaction.Transaction) (user.Storer, error) {
+	return s.storer.ExecuteUnderTransaction(tx)
 }
 
 // Create inserts a new user into the database.
@@ -121,8 +123,6 @@ func (s *Store) QueryByEmail(ctx context.Context, email mail.Address) (user.User
 	return usr, nil
 }
 
-// =============================================================================
-
 // readCache performs a safe search in the cache for the specified key.
 func (s *Store) readCache(key string) (user.User, bool) {
 	s.mu.RLock()
@@ -133,7 +133,7 @@ func (s *Store) readCache(key string) (user.User, bool) {
 		return user.User{}, false
 	}
 
-	return *usr, true
+	return usr, true
 }
 
 // writeCache performs a safe write to the cache for the specified user.
@@ -141,8 +141,8 @@ func (s *Store) writeCache(usr user.User) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.cache[usr.ID.String()] = &usr
-	s.cache[usr.Email.Address] = &usr
+	s.cache[usr.ID.String()] = usr
+	s.cache[usr.Email.Address] = usr
 }
 
 // deleteCache performs a safe removal from the cache for the specified user.
