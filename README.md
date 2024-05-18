@@ -9,6 +9,16 @@
 Copyright 2018, 2019, 2020, 2021, 2022, 2023, 2024 Ardan Labs  
 hello@ardanlabs.com
 
+## My Information
+
+```
+Name:    Bill Kennedy  
+Company: Ardan Labs  
+Title:   Managing Partner  
+Email:   bill@ardanlabs.com  
+Twitter: goinggodotnet  
+```
+
 ## Description
 
 _"As a program evolves and acquires more features, it becomes complicated, with subtle dependencies between components. Over time, complexity accumulates, and it becomes harder and harder for programmers to keep all the relevant factors in their minds as they modify the system. This slows down development and leads to bugs, which slow development even more and add to its cost. Complexity increases inevitably over the life of any program. The larger the program, and the more people that work on it, the more difficult it is to manage complexity."_ - John Ousterhout  
@@ -46,15 +56,15 @@ hello@ardanlabs.com
 
 ## Index
 
-* [Installation](https://github.com/ardanlabs/service#installation)
-* [Create Your Own Version](https://github.com/ardanlabs/service#create-your-own-version)
-* [Purchase Video](https://github.com/ardanlabs/service#purchase-video)
-* [Experience](https://github.com/ardanlabs/service#our-experience)
-* [Teacher](https://github.com/ardanlabs/service#our-teacher)
-* [More About Go](https://github.com/ardanlabs/service#more-about-go)
-* [Minimal Qualified Student](https://github.com/ardanlabs/service#minimal-qualified-student)
-* [Important Reading](https://github.com/ardanlabs/service#important-reading)
-* [Joining the Go Slack Community](https://github.com/ardanlabs/service#joining-the-go-slack-community)
+* [Installation](https://github.com/ardanlabs/service?tab=readme-ov-file#installation)
+* [Create Your Own Version](https://github.com/ardanlabs/service?tab=readme-ov-file#create-your-own-version)
+* [Running The Project](https://github.com/ardanlabs/service?tab=readme-ov-file#running-the-project)
+* [Purchase Video](https://github.com/ardanlabs/service?tab=readme-ov-file#purchase-video)
+* [Experience](https://github.com/ardanlabs/service?tab=readme-ov-file#our-experience)
+* [Teacher](https://github.com/ardanlabs/service?tab=readme-ov-file#our-teacher)
+* [More About Go](https://github.com/ardanlabs/service?tab=readme-ov-file#more-about-go)
+* [Minimal Qualified Student](https://github.com/ardanlabs/service?tab=readme-ov-file#minimal-qualified-student)
+* [Joining the Go Slack Community](https://github.com/ardanlabs/service?tab=readme-ov-file#joining-the-go-slack-community)
 
 ## Installation
 
@@ -73,7 +83,7 @@ $ cd service
 If you want to create a version of the project for your own use, use the new gonew command.
 
 ```
-$ go install golang.org/x/tools/cmd/gonew@latest
+$ go install golang.org/x/tools/programs/gonew@latest
 
 $ cd $HOME
 $ mkdir code
@@ -84,6 +94,37 @@ $ go mod vendor
 ```
 
 Now you have a copy with your own module name. Now all you need to do is initialize the project for git.
+
+## Running The Project
+
+To run the project use the following commands.
+
+```
+# Install Tooling
+$ make dev-gotooling
+$ make dev-brew
+$ make dev-docker
+
+# Run Tests
+$ make test
+
+# Run Project
+$ make dev-up
+$ make dev-udpate-apply
+$ make token
+$ export TOKEN=<COPY TOKEN>
+$ make users
+
+# Run Load
+$ make load
+
+# Run Tooling
+$ make grafana
+$ make statsviz
+
+# Shut everything down
+$ make dev-down
+```
 
 ## Purchase Video
 
@@ -100,19 +141,28 @@ Our classes are perfect for intermediate-level developers who have at least a fe
 ## Our Teacher
 
 ### William Kennedy ([@goinggodotnet](https://twitter.com/goinggodotnet))  
-_William Kennedy is a managing partner at Ardan Labs in Miami, Florida, a mobile, web, and systems development company. Bill has written extensively on the Ardan Labs blog, has written two books, and has trained thousands of developers worldwide in Go. Bill is also a founding member of GoBridge, which is working to increase Go adoption through diversity._
+_William Kennedy is a managing partner at Ardan Labs in Miami, Florida. Ardan Labs is a high-performance development and training firm working with startups and fortune 500 companies. He is also a co-author of the book Go in Action, the author of the blog GoingGo.Net, and a founding member of GoBridge which is working to increase Go adoption through diversity._
 
-_**Ardan Content**_  
-[Ultimate Go Video](https://www.ardanlabs.com/training/ultimate-go/)  
-[Ardan Labs YouTube Channel](http://youtube.ardanlabs.com/)  
-[Ardan Blog](https://www.ardanlabs.com/blog/)    
-[Ardan Labs Podcast: On Going Series](https://ardanlabs.buzzsprout.com/)  
+_**Video Training**_  
+[Ultimate Go Video](https://education.ardanlabs.com)  
+[Ardan Labs YouTube Channel](http://youtube.ardanlabs.com/)
+
+_**Blog**_  
+[Going Go](https://www.ardanlabs.com/blog/)    
+
+_**Writing**_  
+[Running MongoDB Queries Concurrently With Go](http://blog.mongodb.org/post/80579086742/running-mongodb-queries-concurrently-with-go)    
 [Go In Action](https://www.manning.com/books/go-in-action)  
-[Ultimate Go Notebook](https://www.ardanlabs.com/ultimate-go-notebook/)  
 
-_**Conference Talks**_  
+_**Articles**_  
+[IT World Canada](http://www.itworldcanada.com/article/nascent-google-development-language-shows-promise-for-more-productive-coding/387449)
+
+_**Video**_  
+[Golang Charlotte (2024) - Domain Driven, Data Oriented Architecture](https://www.youtube.com/watch?v=bQgNYK1Z5ho)  
+[GopherCon SG (2023) - K8s CPU Limits and Go](https://www.youtube.com/watch?v=Dm7yuoYTx54&list=PLq2Nv-Sh8Eba2gEaId35K2aAUFdpbKx9D&index=6)  
 [P99 Talk (2022) - Evaluating Performance In Go](https://www.youtube.com/watch?v=PYMs-urosXs)  
 [GopherCon Europe (2022) - Practical Memory Profiling](https://www.youtube.com/watch?v=6qAfkJGWsns)  
+[Dgrpah Day (2021) - Getting Started With Dgraph and GraphQL](https://www.youtube.com/watch?v=5L4PUbDqSEo)  
 [GDN Event #1 (2021) - GoBridge Needs Your Help](https://www.youtube.com/watch?v=Tst0oI97cvQ&t=2s)  
 [Training Within The Go Community (2019)](https://www.youtube.com/watch?v=PSR1twjzzAM&feature=youtu.be)  
 [GopherCon Australia (2019) - Modules](https://www.youtube.com/watch?v=MVxbVR_6Tac)  
@@ -133,7 +183,7 @@ _**Conference Talks**_
 [GothamGo (2015) - Error Handling in Go](https://vimeo.com/115782573)  
 [GopherCon (2014) - Building an analytics engine](https://www.youtube.com/watch?v=EfJRQ1lGkUk)  
 
-_**Meetup Talks**_  
+[Golang Charlotte (2023) - Domain Driven, Data Oriented Architecture with Bill Kennedy](https://www.youtube.com/watch?v=bQgNYK1Z5ho)  
 [Prague Meetup (2021) - Go Module Engineering Decisions](https://youtu.be/m8lgcXv2lhI)  
 [Practical Understanding Of Scheduler Semantics (2021)](https://www.youtube.com/watch?v=p2Cjq3Dq2Q0)  
 [Go Generics Draft Proposal (2020)](https://www.youtube.com/watch?v=gIEPspmbMHM&t=2069s)  
@@ -147,7 +197,11 @@ _**Meetup Talks**_
 [Vancouver Meetup - Decoupling From Change](https://www.youtube.com/watch?v=7YcLIbG1ekM&feature=youtu.be)  
 
 _**Podcasts**_  
+[Ardan Labs Podcast: On Going Series](https://ardanlabs.buzzsprout.com/)  
+[Encore, domain design in Go with Bill Kennedy](https://gopodcast.dev/episodes/034-encore-domain-design-in-go-with-bill-kennedy)  
 [Mangtas Nation: A Golang Deep Dive with Bill Kennedy](https://anchor.fm/mangtasnation/episodes/A-Golang-Deep-Dive-with-Bill-Kennedy--S2-EP3-e1ij9c3)  
+[Coding with Holger: Go with Bill Kennedy](https://anchor.fm/coding-with-holger/episodes/Go-with-Bill-Kennedy-e1c9h2q)  
+[Craft of Code: From Programming to Teaching Code with Bill Kennedy](https://podcasts.apple.com/us/podcast/from-programming-to-teaching-code-with-bill-kennedy/id1537136353?i=1000545230339)  
 [GoTime: Design Philosophy](https://changelog.com/gotime/172)  
 [GoTime: Learning and Teaching Go](https://changelog.com/gotime/72)  
 [GoTime: Bill Kennedy on Mechanical Sympathy](https://changelog.com/gotime/6)  
@@ -181,10 +235,6 @@ The material has been designed to be taught in a classroom environment. The code
 	* Has worked with a command shell.
 	* Knows how to maneuver around the file system.
 	* Understands what environment variables are.
-
-## Important Reading
-
-Please check out this page of [important reading](.reading/README.md). You will find articles and videos around topics related to this repo.
 
 ## Joining the Go Slack Community
 

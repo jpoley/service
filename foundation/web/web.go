@@ -3,38 +3,43 @@ package web
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
-	"os"
-	"syscall"
-	"time"
 
-	"github.com/dimfeld/httptreemux/v5"
+	"github.com/ardanlabs/service/foundation/tracer"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// A Handler is a type that handles a http request within our own little mini
-// framework.
-type Handler func(ctx context.Context, w http.ResponseWriter, r *http.Request) error
+// Encoder defines behavior that can encode a data model and provide
+// the content type for that encoding.
+type Encoder interface {
+	Encode() (data []byte, contentType string, err error)
+}
+
+// Handler represents a function that handles a http request within our own
+// little mini framework.
+type Handler func(ctx context.Context, r *http.Request) (Encoder, error)
+
+// Logger represents a function that will be called to add information
+// to the logs.
+type Logger func(ctx context.Context, msg string, args ...any)
 
 // App is the entrypoint into our application and what configures our context
 // object for each of our http handlers. Feel free to add any configuration
 // data/logic on this App struct.
 type App struct {
-	mux      *httptreemux.ContextMux
-	otmux    http.Handler
-	shutdown chan os.Signal
-	mw       []MidHandler
-	tracer   trace.Tracer
+	log     Logger
+	tracer  trace.Tracer
+	mux     *http.ServeMux
+	otmux   http.Handler
+	mw      []Middleware
+	origins []string
 }
 
 // NewApp creates an App value that handle a set of routes for the application.
-func NewApp(shutdown chan os.Signal, tracer trace.Tracer, mw ...MidHandler) *App {
+func NewApp(log Logger, tracer trace.Tracer, mw ...Middleware) *App {
 
 	// Create an OpenTelemetry HTTP Handler which wraps our router. This will start
 	// the initial span and annotate it with information about the request/trusted.
@@ -43,21 +48,15 @@ func NewApp(shutdown chan os.Signal, tracer trace.Tracer, mw ...MidHandler) *App
 	// parent if a client request includes the appropriate headers.
 	// https://w3c.github.io/trace-context/
 
-	mux := httptreemux.NewContextMux()
+	mux := http.NewServeMux()
 
 	return &App{
-		mux:      mux,
-		otmux:    otelhttp.NewHandler(mux, "request"),
-		shutdown: shutdown,
-		mw:       mw,
-		tracer:   tracer,
+		log:    log,
+		tracer: tracer,
+		mux:    mux,
+		otmux:  otelhttp.NewHandler(mux, "request"),
+		mw:     mw,
 	}
-}
-
-// SignalShutdown is used to gracefully shut down the app when an integrity
-// issue is identified.
-func (a *App) SignalShutdown() {
-	a.shutdown <- syscall.SIGTERM
 }
 
 // ServeHTTP implements the http.Handler interface. It's the entry point for
@@ -71,27 +70,37 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // EnableCORS enables CORS preflight requests to work in the middleware. It
 // prevents the MethodNotAllowedHandler from being called. This must be enabled
 // for the CORS middleware to work.
-func (a *App) EnableCORS(mw MidHandler) {
-	a.mw = append(a.mw, mw)
+func (a *App) EnableCORS(origins []string) {
+	a.origins = origins
 
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		return Respond(ctx, w, "OK", http.StatusOK)
+	handler := func(ctx context.Context, r *http.Request) (Encoder, error) {
+		return cors{Status: "OK"}, nil
 	}
-	handler = wrapMiddleware(a.mw, handler)
+	handler = wrapMiddleware([]Middleware{a.corsHandler}, handler)
 
-	a.mux.OptionsHandler = func(w http.ResponseWriter, r *http.Request, params map[string]string) {
-		ctx, span := a.startSpan(w, r)
-		defer span.End()
+	h := func(w http.ResponseWriter, r *http.Request) {
+		handler(r.Context(), r)
+	}
 
-		v := Values{
-			TraceID: span.SpanContext().TraceID().String(),
-			Tracer:  a.tracer,
-			Now:     time.Now().UTC(),
+	finalPath := fmt.Sprintf("%s %s", http.MethodOptions, "/")
+
+	a.mux.HandleFunc(finalPath, h)
+}
+
+func (a *App) corsHandler(webHandler Handler) Handler {
+	h := func(ctx context.Context, r *http.Request) (Encoder, error) {
+		for _, origin := range a.origins {
+			r.Header.Set("Access-Control-Allow-Origin", origin)
 		}
-		ctx = setValues(ctx, &v)
 
-		handler(ctx, w, r)
+		r.Header.Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		r.Header.Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		r.Header.Set("Access-Control-Max-Age", "86400")
+
+		return webHandler(ctx, r)
 	}
+
+	return h
 }
 
 // HandleNoMiddleware sets a handler function for a given HTTP method and path pair
@@ -99,18 +108,18 @@ func (a *App) EnableCORS(mw MidHandler) {
 // OTEL tracing.
 func (a *App) HandleNoMiddleware(method string, group string, path string, handler Handler) {
 	h := func(w http.ResponseWriter, r *http.Request) {
-		v := Values{
-			TraceID: uuid.NewString(),
-			Tracer:  nil,
-			Now:     time.Now().UTC(),
-		}
-		ctx := setValues(r.Context(), &v)
+		ctx := setTraceID(r.Context(), uuid.NewString())
 
-		if err := handler(ctx, w, r); err != nil {
-			if validateError(err) {
-				a.SignalShutdown()
-				return
+		resp, err := handler(ctx, r)
+		if err != nil {
+			if err := respondError(ctx, w, err); err != nil {
+				a.log(ctx, "web-responderror", "ERROR", err)
 			}
+			return
+		}
+
+		if err := respond(ctx, w, resp); err != nil {
+			a.log(ctx, "web-respond", "ERROR", err)
 		}
 	}
 
@@ -118,32 +127,37 @@ func (a *App) HandleNoMiddleware(method string, group string, path string, handl
 	if group != "" {
 		finalPath = "/" + group + path
 	}
+	finalPath = fmt.Sprintf("%s %s", method, finalPath)
 
-	a.mux.Handle(method, finalPath, h)
+	a.mux.HandleFunc(finalPath, h)
 }
 
 // Handle sets a handler function for a given HTTP method and path pair
 // to the application server mux.
-func (a *App) Handle(method string, group string, path string, handler Handler, mw ...MidHandler) {
+func (a *App) Handle(method string, group string, path string, handler Handler, mw ...Middleware) {
 	handler = wrapMiddleware(mw, handler)
 	handler = wrapMiddleware(a.mw, handler)
 
+	if a.origins != nil {
+		handler = wrapMiddleware([]Middleware{a.corsHandler}, handler)
+	}
+
 	h := func(w http.ResponseWriter, r *http.Request) {
-		ctx, span := a.startSpan(w, r)
+		ctx, span := tracer.StartTrace(r.Context(), a.tracer, "pkg.web.handle", r.RequestURI, w)
 		defer span.End()
 
-		v := Values{
-			TraceID: span.SpanContext().TraceID().String(),
-			Tracer:  a.tracer,
-			Now:     time.Now().UTC(),
-		}
-		ctx = setValues(ctx, &v)
+		ctx = setTraceID(ctx, span.SpanContext().TraceID().String())
 
-		if err := handler(ctx, w, r); err != nil {
-			if validateError(err) {
-				a.SignalShutdown()
-				return
+		resp, err := handler(ctx, r)
+		if err != nil {
+			if err := respondError(ctx, w, err); err != nil {
+				a.log(ctx, "web-responderror", "ERROR", err)
 			}
+			return
+		}
+
+		if err := respond(ctx, w, resp); err != nil {
+			a.log(ctx, "web-respond", "ERROR", err)
 		}
 	}
 
@@ -151,68 +165,7 @@ func (a *App) Handle(method string, group string, path string, handler Handler, 
 	if group != "" {
 		finalPath = "/" + group + path
 	}
+	finalPath = fmt.Sprintf("%s %s", method, finalPath)
 
-	a.mux.Handle(method, finalPath, h)
-}
-
-// startSpan initializes the request by adding a span and writing otel
-// related information into the response writer for the trusted.
-func (a *App) startSpan(w http.ResponseWriter, r *http.Request) (context.Context, trace.Span) {
-	ctx := r.Context()
-
-	// There are times when the handler is called without a tracer, such
-	// as with tests. We need a span for the trace id.
-	span := trace.SpanFromContext(ctx)
-
-	// If a tracer exists, then replace the span for the one currently
-	// found in the context. This may have come from over the wire.
-	if a.tracer != nil {
-		ctx, span = a.tracer.Start(ctx, "pkg.web.handle")
-		span.SetAttributes(attribute.String("endpoint", r.RequestURI))
-	}
-
-	// Inject the trace information into the trusted.
-	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(w.Header()))
-
-	return ctx, span
-}
-
-// validateError validates the error for special conditions that do not
-// warrant an actual shutdown by the system.
-func validateError(err error) bool {
-
-	// Ignore syscall.EPIPE and syscall.ECONNRESET errors which occurs
-	// when a write operation happens on the http.ResponseWriter that
-	// has simultaneously been disconnected by the client (TCP
-	// connections is broken). For instance, when large amounts of
-	// data is being written or streamed to the client.
-	// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
-	// https://gosamples.dev/broken-pipe/
-	// https://gosamples.dev/connection-reset-by-peer/
-
-	switch {
-	case errors.Is(err, syscall.EPIPE):
-
-		// Usually, you get the broken pipe error when you write to the connection after the
-		// RST (TCP RST Flag) is sent.
-		// The broken pipe is a TCP/IP error occurring when you write to a stream where the
-		// other end (the peer) has closed the underlying connection. The first write to the
-		// closed connection causes the peer to reply with an RST packet indicating that the
-		// connection should be terminated immediately. The second write to the socket that
-		// has already received the RST causes the broken pipe error.
-		return false
-
-	case errors.Is(err, syscall.ECONNRESET):
-
-		// Usually, you get connection reset by peer error when you read from the
-		// connection after the RST (TCP RST Flag) is sent.
-		// The connection reset by peer is a TCP/IP error that occurs when the other end (peer)
-		// has unexpectedly closed the connection. It happens when you send a packet from your
-		// end, but the other end crashes and forcibly closes the connection with the RST
-		// packet instead of the TCP FIN, which is used to close a connection under normal
-		// circumstances.
-		return false
-	}
-
-	return true
+	a.mux.HandleFunc(finalPath, h)
 }

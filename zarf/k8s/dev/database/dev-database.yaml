@@ -47,7 +47,7 @@ spec:
                 path: "pg_hba.conf"
       containers:
       - name: postgres
-        image: postgres:16.1
+        image: postgres:16.2
         volumeMounts:
           - name: data
             mountPath: /var/lib/postgresql/data
@@ -60,7 +60,7 @@ spec:
           requests:
             cpu: 100m
           limits:
-            cpu: 3750m
+            cpu: 3400m
         env:
         - name: POSTGRES_PASSWORD
           value: postgres

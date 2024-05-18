@@ -7,15 +7,18 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 # ==============================================================================
 # Go Installation
 #
-#   You need to have Go version 1.21 to run this code.
+#   You need to have Go version 1.22 to run this code.
+#
 #   https://go.dev/dl/
 #
 #   If you are not allowed to update your Go frontend, you can install
-#   and use a 1.21 frontend.
-#   $ go install golang.org/dl/go1.21.6@latest
-#   $ go1.21.6 download
+#   and use a 1.22 frontend.
 #
-#   This means you need to use go1.21.6 instead of go.
+#   $ go install golang.org/dl/go1.22@latest
+#   $ go1.22 download
+#
+#   This means you need to use `go1.22` instead of `go` for any command
+#   using the Go frontend tooling from the makefile.
 
 # ==============================================================================
 # Brew Installation
@@ -45,7 +48,10 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 # Install Tooling and Dependencies
 #
 #   This project uses Docker and it is expected to be installed. Please provide
-#   Docker at least 4 CPUs.
+#   Docker at least 4 CPUs. To use Podman instead please alias Docker CLI to
+#   Podman CLI or symlink the Docker socket to the Podman socket. More
+#   information on migrating from Docker to Podman can be found at
+#   https://podman-desktop.io/docs/migrating-from-docker.
 #
 #	Run these commands to install everything needed.
 #	$ make dev-brew
@@ -59,6 +65,7 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 #	dependencies properly.
 #
 #	$ make test
+#
 
 # ==============================================================================
 # Running The Project
@@ -72,30 +79,16 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 #   You can use `make dev-status` to look at the status of your KIND cluster.
 
 # ==============================================================================
-# Project Tooling
-#
-#   There is tooling that can generate documentation and add a new domain to
-#   the code base. The code that is generated for a new domain provides the
-#   common code needed for all domains.
-#
-#   Generating Documentation
-#   $ go run app/tooling/docs/main.go --browser
-#   $ go run app/tooling/docs/main.go -out json
-#
-#   Adding New Domain To System
-#   $ go run app/tooling/sales-admin/main.go domain sale
-
-# ==============================================================================
 # CLASS NOTES
 #
 # Kind
-# 	For full Kind v0.20 release notes: https://github.com/kubernetes-sigs/kind/releases/tag/v0.20.0
+# 	For full Kind v0.22 release notes: https://github.com/kubernetes-sigs/kind/releases/tag/v0.22.0
 #
 # RSA Keys
 # 	To generate a private/public key PEM file.
 # 	$ openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:2048
 # 	$ openssl rsa -pubout -in private.pem -out public.pem
-# 	$ ./sales-admin genkey
+# 	$ ./admin genkey
 #
 # Testing Coverage
 # 	$ go test -coverprofile p.out
@@ -117,24 +110,25 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 # ==============================================================================
 # Define dependencies
 
-GOLANG          := golang:1.21.6
+GOLANG          := golang:1.22
 ALPINE          := alpine:3.19
-KIND            := kindest/node:v1.29.0@sha256:eaa1450915475849a73a9227b8f201df25e55e268e5d619312131292e324d570
-POSTGRES        := postgres:16.1
-GRAFANA         := grafana/grafana:10.2.0
-PROMETHEUS      := prom/prometheus:v2.48.0
-TEMPO           := grafana/tempo:2.3.0
+KIND            := kindest/node:v1.30.0
+POSTGRES        := postgres:16.2
+GRAFANA         := grafana/grafana:10.4.0
+PROMETHEUS      := prom/prometheus:v2.51.0
+TEMPO           := grafana/tempo:2.4.0
 LOKI            := grafana/loki:2.9.0
 PROMTAIL        := grafana/promtail:2.9.0
 
 KIND_CLUSTER    := ardan-starter-cluster
 NAMESPACE       := sales-system
-APP             := sales
-BASE_IMAGE_NAME := ardanlabs/service
-SERVICE_NAME    := sales-api
+SALES_APP       := sales
+AUTH_APP        := auth
+BASE_IMAGE_NAME := localhost/ardanlabs
 VERSION         := 0.0.1
-SERVICE_IMAGE   := $(BASE_IMAGE_NAME)/$(SERVICE_NAME):$(VERSION)
-METRICS_IMAGE   := $(BASE_IMAGE_NAME)/$(SERVICE_NAME)-metrics:$(VERSION)
+SALES_IMAGE     := $(BASE_IMAGE_NAME)/$(SALES_APP):$(VERSION)
+METRICS_IMAGE   := $(BASE_IMAGE_NAME)/metrics:$(VERSION)
+AUTH_IMAGE      := $(BASE_IMAGE_NAME)/$(AUTH_APP):$(VERSION)
 
 # VERSION       := "0.0.1-$(shell git rev-parse --short HEAD)"
 
@@ -154,29 +148,31 @@ dev-brew:
 	brew list kubectl || brew install kubectl
 	brew list kustomize || brew install kustomize
 	brew list pgcli || brew install pgcli
+	brew list watch || brew instal watch
 
 dev-docker:
-	docker pull $(GOLANG)
-	docker pull $(ALPINE)
-	docker pull $(KIND)
-	docker pull $(POSTGRES)
-	docker pull $(GRAFANA)
-	docker pull $(PROMETHEUS)
-	docker pull $(TEMPO)
-	docker pull $(LOKI)
-	docker pull $(PROMTAIL)
+	docker pull $(GOLANG) & \
+	docker pull $(ALPINE) & \
+	docker pull $(KIND) & \
+	docker pull $(POSTGRES) & \
+	docker pull $(GRAFANA) & \
+	docker pull $(PROMETHEUS) & \
+	docker pull $(TEMPO) & \
+	docker pull $(LOKI) & \
+	docker pull $(PROMTAIL) & \
+	wait;
 
 # ==============================================================================
 # Building containers
 
-all: service metrics
+build: sales metrics auth
 
-service:
+sales:
 	docker build \
-		-f zarf/docker/dockerfile.service \
-		-t $(SERVICE_IMAGE) \
+		-f zarf/docker/dockerfile.sales \
+		-t $(SALES_IMAGE) \
 		--build-arg BUILD_REF=$(VERSION) \
-		--build-arg BUILD_DATE=`date -u +"%Y-%m-%dT%H:%M:%SZ"` \
+		--build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
 		.
 
 metrics:
@@ -184,7 +180,15 @@ metrics:
 		-f zarf/docker/dockerfile.metrics \
 		-t $(METRICS_IMAGE) \
 		--build-arg BUILD_REF=$(VERSION) \
-		--build-arg BUILD_DATE=`date -u +"%Y-%m-%dT%H:%M:%SZ"` \
+		--build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+		.
+
+auth:
+	docker build \
+		-f zarf/docker/dockerfile.auth \
+		-t $(AUTH_IMAGE) \
+		--build-arg BUILD_REF=$(VERSION) \
+		--build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
 		.
 
 # ==============================================================================
@@ -198,37 +202,32 @@ dev-up:
 
 	kubectl wait --timeout=120s --namespace=local-path-storage --for=condition=Available deployment/local-path-provisioner
 
-	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER)
-	kind load docker-image $(GRAFANA) --name $(KIND_CLUSTER)
-	kind load docker-image $(PROMETHEUS) --name $(KIND_CLUSTER)
-	kind load docker-image $(TEMPO) --name $(KIND_CLUSTER)
-	kind load docker-image $(LOKI) --name $(KIND_CLUSTER)
-	kind load docker-image $(PROMTAIL) --name $(KIND_CLUSTER)
+	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(GRAFANA) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(PROMETHEUS) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(TEMPO) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(LOKI) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(PROMTAIL) --name $(KIND_CLUSTER) & \
+	wait;
 
 dev-down:
 	kind delete cluster --name $(KIND_CLUSTER)
 
-dev-status:
+dev-status-all:
 	kubectl get nodes -o wide
 	kubectl get svc -o wide
 	kubectl get pods -o wide --watch --all-namespaces
 
+dev-status:
+	watch -n 2 kubectl get pods -o wide --all-namespaces
+
 # ------------------------------------------------------------------------------
 
 dev-load:
-	kind load docker-image $(SERVICE_IMAGE) --name $(KIND_CLUSTER)
-	kind load docker-image $(METRICS_IMAGE) --name $(KIND_CLUSTER)
-
-# podman is currently experimental, and fails for some reason with kind load
-# docker-image (possibly a tagging issue?) but the below works.
-dev-load-podman:
-	docker image save $(SERVICE_IMAGE):$(VERSION) -o image-sales
-	kind load image-archive image-sales --name ardan-starter-cluster
-	rm -f image-sales-metrics image-sales
-
-	rm -f image-sales-metrics image-sales
-	docker image save $(METRICS_IMAGE):$(VERSION) -o image-sales-metrics
-	kind load image-archive image-sales-metrics --name ardan-starter-cluster
+	kind load docker-image $(SALES_IMAGE) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(METRICS_IMAGE) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(AUTH_IMAGE) --name $(KIND_CLUSTER) & \
+	wait;
 
 dev-apply:
 	kustomize build zarf/k8s/dev/grafana | kubectl apply -f -
@@ -240,32 +239,42 @@ dev-apply:
 	kustomize build zarf/k8s/dev/database | kubectl apply -f -
 	kubectl rollout status --namespace=$(NAMESPACE) --watch --timeout=120s sts/database
 
+	kustomize build zarf/k8s/dev/auth | kubectl apply -f -
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(AUTH_APP) --timeout=120s --for=condition=Ready
+
 	kustomize build zarf/k8s/dev/sales | kubectl apply -f -
-	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(APP) --timeout=120s --for=condition=Ready
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(SALES_APP) --timeout=120s --for=condition=Ready
 
 dev-restart:
-	kubectl rollout restart deployment $(APP) --namespace=$(NAMESPACE)
+	kubectl rollout restart deployment $(AUTH_APP) --namespace=$(NAMESPACE)
+	kubectl rollout restart deployment $(SALES_APP) --namespace=$(NAMESPACE)
 
-dev-update: all dev-load dev-restart
+dev-update: build dev-load dev-restart
 
-dev-update-apply: all dev-load dev-apply
+dev-update-apply: build dev-load dev-apply
 
 dev-logs:
-	kubectl logs --namespace=$(NAMESPACE) -l app=$(APP) --all-containers=true -f --tail=100 --max-log-requests=6 | go run app/tooling/logfmt/main.go -service=$(SERVICE_NAME)
+	kubectl logs --namespace=$(NAMESPACE) -l app=$(SALES_APP) --all-containers=true -f --tail=100 --max-log-requests=6 | go run api/cmd/tooling/logfmt/main.go -service=$(SALES_APP)
+
+dev-logs-auth:
+	kubectl logs --namespace=$(NAMESPACE) -l app=$(AUTH_APP) --all-containers=true -f --tail=100 | go run api/cmd/tooling/logfmt/main.go
 
 # ------------------------------------------------------------------------------
 
 dev-logs-init:
-	kubectl logs --namespace=$(NAMESPACE) -l app=$(APP) -f --tail=100 -c init-migrate-seed
+	kubectl logs --namespace=$(NAMESPACE) -l app=$(SALES_APP) -f --tail=100 -c init-migrate-seed
 
 dev-describe-node:
 	kubectl describe node
 
 dev-describe-deployment:
-	kubectl describe deployment --namespace=$(NAMESPACE) $(APP)
+	kubectl describe deployment --namespace=$(NAMESPACE) $(SALES_APP)
 
 dev-describe-sales:
-	kubectl describe pod --namespace=$(NAMESPACE) -l app=$(APP)
+	kubectl describe pod --namespace=$(NAMESPACE) -l app=$(SALES_APP)
+
+dev-describe-auth:
+	kubectl describe pod --namespace=$(NAMESPACE) -l app=$(AUTH_APP)
 
 dev-describe-database:
 	kubectl describe pod --namespace=$(NAMESPACE) -l app=database
@@ -302,7 +311,7 @@ dev-services-delete:
 
 dev-describe-replicaset:
 	kubectl get rs
-	kubectl describe rs --namespace=$(NAMESPACE) -l app=$(APP)
+	kubectl describe rs --namespace=$(NAMESPACE) -l app=$(SALES_APP)
 
 dev-events:
 	kubectl get ev --sort-by metadata.creationTimestamp
@@ -320,10 +329,10 @@ dev-database-restart:
 # Administration
 
 migrate:
-	export SALES_DB_HOST=localhost; go run app/tooling/sales-admin/main.go migrate
+	export SALES_DB_HOST_PORT=localhost; go run apis/tooling/admin/main.go migrate
 
 seed: migrate
-	export SALES_DB_HOST=localhost; go run app/tooling/sales-admin/main.go seed
+	export SALES_DB_HOST_PORT=localhost; go run apis/tooling/admin/main.go seed
 
 pgcli:
 	pgcli postgresql://postgres:postgres@localhost
@@ -335,30 +344,31 @@ readiness:
 	curl -il http://localhost:3000/v1/readiness
 
 token-gen:
-	export SALES_DB_HOST=localhost; go run app/tooling/sales-admin/main.go gentoken 5cf37266-3473-4006-984f-9325122678b7 54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
-
-docs:
-	go run app/tooling/docs/main.go --browser
+	export SALES_DB_HOST_PORT=localhost; go run apis/tooling/admin/main.go gentoken 5cf37266-3473-4006-984f-9325122678b7 54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
 
 # ==============================================================================
 # Metrics and Tracing
 
 metrics-view-sc:
-	expvarmon -ports="localhost:4000" -vars="build,requests,goroutines,errors,panics,mem:memstats.Alloc"
+	expvarmon -ports="localhost:3010" -vars="build,requests,goroutines,errors,panics,mem:memstats.HeapAlloc,mem:memstats.HeapSys,mem:memstats.Sys"
 
 metrics-view:
-	expvarmon -ports="localhost:3001" -endpoint="/metrics" -vars="build,requests,goroutines,errors,panics,mem:memstats.Alloc"
+	expvarmon -ports="localhost:4020" -endpoint="/metrics" -vars="build,requests,goroutines,errors,panics,mem:memstats.HeapAlloc,mem:memstats.HeapSys,mem:memstats.Sys"
 
 grafana:
 	open -a "Google Chrome" http://localhost:3100/
 
 statsviz:
-	open -a "Google Chrome" http://localhost:4000/debug/statsviz
+	open -a "Google Chrome" http://localhost:3010/debug/statsviz
 
 # ==============================================================================
 # Running tests within the local computer
 
-test-race:
+test-down:
+	docker stop servicetest
+	docker rm servicetest -v
+
+test-r:
 	CGO_ENABLED=1 go test -race -count=1 ./...
 
 test-only:
@@ -373,24 +383,34 @@ vuln-check:
 
 test: test-only lint vuln-check
 
-test-race: test-race lint vuln-check
+test-race: test-r lint vuln-check
 
 # ==============================================================================
 # Hitting endpoints
 
 token:
-	curl -il --user "admin@example.com:gophers" http://localhost:3000/v1/users/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
+	curl -il \
+	--user "admin@example.com:gophers" http://localhost:6000/v1/auth/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
 
 # export TOKEN="COPY TOKEN STRING FROM LAST CALL"
 
 users:
-	curl -il -H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
+	curl -il \
+	-H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
+
+users-timeout:
+	curl -il \
+	--max-time 1 \
+	-H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
 
 load:
-	hey -m GET -c 100 -n 1000 -H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
+	hey -m GET -c 100 -n 1000 \
+	-H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
 
 otel-test:
-	curl -il -H "Traceparent: 00-918dd5ecf264712262b68cf2ef8b5239-896d90f23f69f006-01" --user "admin@example.com:gophers" http://localhost:3000/v1/users/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
+	curl -il \
+	-H "Traceparent: 00-918dd5ecf264712262b68cf2ef8b5239-896d90f23f69f006-01" \
+	--user "admin@example.com:gophers" http://localhost:3000/v1/users/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
 
 # ==============================================================================
 # Modules support
@@ -422,10 +442,10 @@ list:
 # Class Stuff
 
 run:
-	go run app/services/sales-api/main.go | go run app/tooling/logfmt/main.go
+	go run api/cmd/services/sales/main.go | go run api/cmd/tooling/logfmt/main.go
 
 run-help:
-	go run app/services/sales-api/main.go --help | go run app/tooling/logfmt/main.go
+	go run api/cmd/services/sales/main.go --help | go run api/cmd/tooling/logfmt/main.go
 
 curl:
 	curl -il http://localhost:3000/v1/hack
@@ -437,7 +457,7 @@ load-hack:
 	hey -m GET -c 100 -n 100000 "http://localhost:3000/v1/hack"
 
 admin:
-	go run app/tooling/sales-admin/main.go
+	go run api/cmd/tooling/admin/main.go
 
 ready:
 	curl -il http://localhost:3000/v1/readiness
@@ -446,12 +466,16 @@ live:
 	curl -il http://localhost:3000/v1/liveness
 
 curl-create:
-	curl -il -X POST -H 'Content-Type: application/json' -d '{"name":"bill","email":"b@gmail.com","roles":["ADMIN"],"department":"IT","password":"123","passwordConfirm":"123"}' http://localhost:3000/v1/users
+	curl -il -X POST \
+	-H "Authorization: Bearer ${TOKEN}" \
+	-H 'Content-Type: application/json' \
+	-d '{"name":"bill","email":"b@gmail.com","roles":["ADMIN"],"department":"IT","password":"123","passwordConfirm":"123"}' \
+	http://localhost:3000/v1/users
 
 # ==============================================================================
 # Talk commands
 
-dev-talk-up:
+talk-up:
 	kind create cluster \
 		--image $(KIND) \
 		--name $(KIND_CLUSTER) \
@@ -459,39 +483,54 @@ dev-talk-up:
 
 	kubectl wait --timeout=120s --namespace=local-path-storage --for=condition=Available deployment/local-path-provisioner
 
-	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER)	
+	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER)
 
-dev-talk-apply:
+talk-apply:
 	kustomize build zarf/k8s/dev/database | kubectl apply -f -
 	kubectl rollout status --namespace=$(NAMESPACE) --watch --timeout=120s sts/database
 
 	kustomize build zarf/k8s/dev/sales | kubectl apply -f -
-	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(APP) --timeout=120s --for=condition=Ready
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(SALES_APP) --timeout=120s --for=condition=Ready
 
-dev-talk-build: all dev-load dev-talk-apply
+talk-build: all dev-load talk-apply
 
-load-talk:
-	hey -m GET -c 10 -n 100 -H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
+talk-load:
+	hey -m GET -c 10 -n 1000 -H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
+
+talk-logs:
+	kubectl logs --namespace=$(NAMESPACE) -l app=$(SALES_APP) --all-containers=true -f --tail=100 --max-log-requests=6
+
+talk-logs-cpu:
+	kubectl logs --namespace=$(NAMESPACE) -l app=$(SALES_APP) --all-containers=true -f --tail=100 --max-log-requests=6 | grep SCHED
+
+talk-logs-mem:
+	kubectl logs --namespace=$(NAMESPACE) -l app=$(SALES_APP) --all-containers=true -f --tail=100 --max-log-requests=6 | grep "ms clock"
+
+talk-describe:
+	kubectl describe pod --namespace=$(NAMESPACE) -l app=$(SALES_APP)
+
+talk-metrics:
+	expvarmon -ports="localhost:4000" -vars="build,requests,goroutines,errors,panics,mem:memstats.HeapAlloc,mem:memstats.HeapSys,mem:memstats.Sys"
 
 # ==============================================================================
 # Admin Frontend
 
-ADMIN_FRONTEND_PREFIX := ./app/frontends/admin
+ADMIN_FRONTEND_PREFIX := ./apis/frontends/admin
 
 write-token-to-env:
 	echo "VITE_SERVICE_API=http://localhost:3000/v1" > ${ADMIN_FRONTEND_PREFIX}/.env
 	make token | grep -o '"ey.*"' | awk '{print "VITE_SERVICE_TOKEN="$$1}' >> ${ADMIN_FRONTEND_PREFIX}/.env
 
 admin-gui-install:
-	pnpm -C ${ADMIN_FRONTEND_PREFIX} install 
+	pnpm -C ${ADMIN_FRONTEND_PREFIX} install
 
 admin-gui-dev: admin-gui-install
-	pnpm -C ${ADMIN_FRONTEND_PREFIX} run dev 
+	pnpm -C ${ADMIN_FRONTEND_PREFIX} run dev
 
 admin-gui-build: admin-gui-install
-	pnpm -C ${ADMIN_FRONTEND_PREFIX} run build 
+	pnpm -C ${ADMIN_FRONTEND_PREFIX} run build
 
 admin-gui-start-build: admin-gui-build
-	pnpm -C ${ADMIN_FRONTEND_PREFIX} run preview 
+	pnpm -C ${ADMIN_FRONTEND_PREFIX} run preview
 
 admin-gui-run: write-token-to-env admin-gui-start-build
