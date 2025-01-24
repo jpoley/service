@@ -3,6 +3,7 @@ package errs
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 )
@@ -80,12 +81,23 @@ func Newf(code ErrCode, format string, v ...any) *Error {
 	}
 }
 
+// NewError checks for an Error in the error interface value. If it doesn't
+// exist, will create one from the error.
+func NewError(err error) *Error {
+	var errsErr *Error
+	if errors.As(err, &errsErr) {
+		return errsErr
+	}
+
+	return New(Internal, err)
+}
+
 // Error implements the error interface.
 func (e *Error) Error() string {
 	return e.Message
 }
 
-// Encode implments the encoder interface.
+// Encode implements the encoder interface.
 func (e *Error) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(e)
 	return data, "application/json", err
@@ -100,4 +112,49 @@ func (e *Error) HTTPStatus() int {
 // Equal provides support for the go-cmp package and testing.
 func (e *Error) Equal(e2 *Error) bool {
 	return e.Code == e2.Code && e.Message == e2.Message
+}
+
+// =============================================================================
+
+// FieldError is used to indicate an error with a specific request field.
+type FieldError struct {
+	Field string `json:"field"`
+	Err   string `json:"error"`
+}
+
+// FieldErrors represents a collection of field errors.
+type FieldErrors []FieldError
+
+// NewFieldErrors creates a field errors.
+func NewFieldErrors(field string, err error) *Error {
+	fe := FieldErrors{
+		{
+			Field: field,
+			Err:   err.Error(),
+		},
+	}
+
+	return fe.ToError()
+}
+
+// Add adds a field error to the collection.
+func (fe *FieldErrors) Add(field string, err error) {
+	*fe = append(*fe, FieldError{
+		Field: field,
+		Err:   err.Error(),
+	})
+}
+
+// ToError converts the field errors to an Error.
+func (fe FieldErrors) ToError() *Error {
+	return New(InvalidArgument, fe)
+}
+
+// Error implements the error interface.
+func (fe FieldErrors) Error() string {
+	d, err := json.Marshal(fe)
+	if err != nil {
+		return err.Error()
+	}
+	return string(d)
 }

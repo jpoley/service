@@ -83,7 +83,7 @@ $ cd service
 If you want to create a version of the project for your own use, use the new gonew command.
 
 ```
-$ go install golang.org/x/tools/programs/gonew@latest
+$ go install golang.org/x/tools/cmd/gonew@latest
 
 $ cd $HOME
 $ mkdir code
@@ -108,9 +108,12 @@ $ make dev-docker
 # Run Tests
 $ make test
 
+# Shutdown Tests
+$ make test-down
+
 # Run Project
 $ make dev-up
-$ make dev-udpate-apply
+$ make dev-update-apply
 $ make token
 $ export TOKEN=<COPY TOKEN>
 $ make users
@@ -122,7 +125,7 @@ $ make load
 $ make grafana
 $ make statsviz
 
-# Shut everything down
+# Shut Project
 $ make dev-down
 ```
 

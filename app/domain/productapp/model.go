@@ -9,21 +9,10 @@ import (
 	"github.com/ardanlabs/service/app/sdk/errs"
 	"github.com/ardanlabs/service/app/sdk/mid"
 	"github.com/ardanlabs/service/business/domain/productbus"
-	"github.com/ardanlabs/service/foundation/validate"
+	"github.com/ardanlabs/service/business/types/money"
+	"github.com/ardanlabs/service/business/types/name"
+	"github.com/ardanlabs/service/business/types/quantity"
 )
-
-// QueryParams represents the set of possible query strings.
-type QueryParams struct {
-	Page     string
-	Rows     string
-	OrderBy  string
-	ID       string
-	Name     string
-	Cost     string
-	Quantity string
-}
-
-// =============================================================================
 
 // Product represents information about an individual product.
 type Product struct {
@@ -36,7 +25,7 @@ type Product struct {
 	DateUpdated string  `json:"dateUpdated"`
 }
 
-// Encode implments the encoder interface.
+// Encode implements the encoder interface.
 func (app Product) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(app)
 	return data, "application/json", err
@@ -47,8 +36,8 @@ func toAppProduct(prd productbus.Product) Product {
 		ID:          prd.ID.String(),
 		UserID:      prd.UserID.String(),
 		Name:        prd.Name.String(),
-		Cost:        prd.Cost,
-		Quantity:    prd.Quantity,
+		Cost:        prd.Cost.Value(),
+		Quantity:    prd.Quantity.Value(),
 		DateCreated: prd.DateCreated.Format(time.RFC3339),
 		DateUpdated: prd.DateUpdated.Format(time.RFC3339),
 	}
@@ -72,15 +61,15 @@ type NewProduct struct {
 	Quantity int     `json:"quantity" validate:"required,gte=1"`
 }
 
-// Decode implments the decoder interface.
+// Decode implements the decoder interface.
 func (app *NewProduct) Decode(data []byte) error {
-	return json.Unmarshal(data, &app)
+	return json.Unmarshal(data, app)
 }
 
 // Validate checks the data in the model is considered clean.
 func (app NewProduct) Validate() error {
-	if err := validate.Check(app); err != nil {
-		return errs.Newf(errs.FailedPrecondition, "validate: %s", err)
+	if err := errs.Check(app); err != nil {
+		return fmt.Errorf("validate: %w", err)
 	}
 
 	return nil
@@ -92,16 +81,26 @@ func toBusNewProduct(ctx context.Context, app NewProduct) (productbus.NewProduct
 		return productbus.NewProduct{}, fmt.Errorf("getuserid: %w", err)
 	}
 
-	name, err := productbus.Names.Parse(app.Name)
+	name, err := name.Parse(app.Name)
 	if err != nil {
 		return productbus.NewProduct{}, fmt.Errorf("parse name: %w", err)
+	}
+
+	cost, err := money.Parse(app.Cost)
+	if err != nil {
+		return productbus.NewProduct{}, fmt.Errorf("parse cost: %w", err)
+	}
+
+	quantity, err := quantity.Parse(app.Quantity)
+	if err != nil {
+		return productbus.NewProduct{}, fmt.Errorf("parse quantity: %w", err)
 	}
 
 	bus := productbus.NewProduct{
 		UserID:   userID,
 		Name:     name,
-		Cost:     app.Cost,
-		Quantity: app.Quantity,
+		Cost:     cost,
+		Quantity: quantity,
 	}
 
 	return bus, nil
@@ -116,34 +115,52 @@ type UpdateProduct struct {
 	Quantity *int     `json:"quantity" validate:"omitempty,gte=1"`
 }
 
-// Decode implments the decoder interface.
+// Decode implements the decoder interface.
 func (app *UpdateProduct) Decode(data []byte) error {
-	return json.Unmarshal(data, &app)
+	return json.Unmarshal(data, app)
 }
 
 // Validate checks the data in the model is considered clean.
 func (app UpdateProduct) Validate() error {
-	if err := validate.Check(app); err != nil {
-		return errs.Newf(errs.FailedPrecondition, "validate: %s", err)
+	if err := errs.Check(app); err != nil {
+		return fmt.Errorf("validate: %w", err)
 	}
 
 	return nil
 }
 
 func toBusUpdateProduct(app UpdateProduct) (productbus.UpdateProduct, error) {
-	var name *productbus.Name
+	var nme *name.Name
 	if app.Name != nil {
-		nm, err := productbus.Names.Parse(*app.Name)
+		nm, err := name.Parse(*app.Name)
 		if err != nil {
 			return productbus.UpdateProduct{}, fmt.Errorf("parse: %w", err)
 		}
-		name = &nm
+		nme = &nm
+	}
+
+	var cost *money.Money
+	if app.Cost != nil {
+		cst, err := money.Parse(*app.Cost)
+		if err != nil {
+			return productbus.UpdateProduct{}, fmt.Errorf("parse: %w", err)
+		}
+		cost = &cst
+	}
+
+	var qnt *quantity.Quantity
+	if app.Cost != nil {
+		qn, err := quantity.Parse(*app.Quantity)
+		if err != nil {
+			return productbus.UpdateProduct{}, fmt.Errorf("parse: %w", err)
+		}
+		qnt = &qn
 	}
 
 	bus := productbus.UpdateProduct{
-		Name:     name,
-		Cost:     app.Cost,
-		Quantity: app.Quantity,
+		Name:     nme,
+		Cost:     cost,
+		Quantity: qnt,
 	}
 
 	return bus, nil

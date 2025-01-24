@@ -3,7 +3,6 @@ package productbus_test
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
 	"sort"
 	"testing"
 	"time"
@@ -13,20 +12,17 @@ import (
 	"github.com/ardanlabs/service/business/sdk/dbtest"
 	"github.com/ardanlabs/service/business/sdk/page"
 	"github.com/ardanlabs/service/business/sdk/unitest"
+	"github.com/ardanlabs/service/business/types/money"
+	"github.com/ardanlabs/service/business/types/name"
+	"github.com/ardanlabs/service/business/types/quantity"
+	"github.com/ardanlabs/service/business/types/role"
 	"github.com/google/go-cmp/cmp"
 )
 
 func Test_Product(t *testing.T) {
 	t.Parallel()
 
-	db := dbtest.NewDatabase(t, "Test_Product")
-	defer func() {
-		if r := recover(); r != nil {
-			t.Log(r)
-			t.Error(string(debug.Stack()))
-		}
-		db.Teardown()
-	}()
+	db := dbtest.New(t, "Test_Product")
 
 	sd, err := insertSeedData(db.BusDomain)
 	if err != nil {
@@ -46,7 +42,7 @@ func Test_Product(t *testing.T) {
 func insertSeedData(busDomain dbtest.BusDomain) (unitest.SeedData, error) {
 	ctx := context.Background()
 
-	usrs, err := userbus.TestSeedUsers(ctx, 1, userbus.Roles.User, busDomain.User)
+	usrs, err := userbus.TestSeedUsers(ctx, 1, role.User, busDomain.User)
 	if err != nil {
 		return unitest.SeedData{}, fmt.Errorf("seeding users : %w", err)
 	}
@@ -63,7 +59,7 @@ func insertSeedData(busDomain dbtest.BusDomain) (unitest.SeedData, error) {
 
 	// -------------------------------------------------------------------------
 
-	usrs, err = userbus.TestSeedUsers(ctx, 1, userbus.Roles.Admin, busDomain.User)
+	usrs, err = userbus.TestSeedUsers(ctx, 1, role.Admin, busDomain.User)
 	if err != nil {
 		return unitest.SeedData{}, fmt.Errorf("seeding users : %w", err)
 	}
@@ -105,7 +101,7 @@ func query(busDomain dbtest.BusDomain, sd unitest.SeedData) []unitest.Table {
 			ExpResp: prds,
 			ExcFunc: func(ctx context.Context) any {
 				filter := productbus.QueryFilter{
-					Name: dbtest.ProductNamePointer("Name"),
+					Name: dbtest.NamePointer("Name"),
 				}
 
 				resp, err := busDomain.Product.Query(ctx, filter, productbus.DefaultOrderBy, page.MustParse("1", "10"))
@@ -177,16 +173,16 @@ func create(busDomain dbtest.BusDomain, sd unitest.SeedData) []unitest.Table {
 			Name: "basic",
 			ExpResp: productbus.Product{
 				UserID:   sd.Users[0].ID,
-				Name:     productbus.Names.MustParse("Guitar"),
-				Cost:     10.34,
-				Quantity: 10,
+				Name:     name.MustParse("Guitar"),
+				Cost:     money.MustParse(10.34),
+				Quantity: quantity.MustParse(10),
 			},
 			ExcFunc: func(ctx context.Context) any {
 				np := productbus.NewProduct{
 					UserID:   sd.Users[0].ID,
-					Name:     productbus.Names.MustParse("Guitar"),
-					Cost:     10.34,
-					Quantity: 10,
+					Name:     name.MustParse("Guitar"),
+					Cost:     money.MustParse(10.34),
+					Quantity: quantity.MustParse(10),
 				}
 
 				resp, err := busDomain.Product.Create(ctx, np)
@@ -223,17 +219,17 @@ func update(busDomain dbtest.BusDomain, sd unitest.SeedData) []unitest.Table {
 			ExpResp: productbus.Product{
 				ID:          sd.Users[0].Products[0].ID,
 				UserID:      sd.Users[0].ID,
-				Name:        productbus.Names.MustParse("Guitar"),
-				Cost:        10.34,
-				Quantity:    10,
+				Name:        name.MustParse("Guitar"),
+				Cost:        money.MustParse(10.34),
+				Quantity:    quantity.MustParse(10),
 				DateCreated: sd.Users[0].Products[0].DateCreated,
 				DateUpdated: sd.Users[0].Products[0].DateCreated,
 			},
 			ExcFunc: func(ctx context.Context) any {
 				up := productbus.UpdateProduct{
-					Name:     dbtest.ProductNamePointer("Guitar"),
-					Cost:     dbtest.FloatPointer(10.34),
-					Quantity: dbtest.IntPointer(10),
+					Name:     dbtest.NamePointer("Guitar"),
+					Cost:     dbtest.MoneyPointer(10.34),
+					Quantity: dbtest.QuantityPointer(10),
 				}
 
 				resp, err := busDomain.Product.Update(ctx, sd.Users[0].Products[0], up)

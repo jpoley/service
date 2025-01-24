@@ -5,6 +5,9 @@ import (
 	"time"
 
 	"github.com/ardanlabs/service/business/domain/productbus"
+	"github.com/ardanlabs/service/business/types/money"
+	"github.com/ardanlabs/service/business/types/name"
+	"github.com/ardanlabs/service/business/types/quantity"
 	"github.com/google/uuid"
 )
 
@@ -23,8 +26,8 @@ func toDBProduct(bus productbus.Product) product {
 		ID:          bus.ID,
 		UserID:      bus.UserID,
 		Name:        bus.Name.String(),
-		Cost:        bus.Cost,
-		Quantity:    bus.Quantity,
+		Cost:        bus.Cost.Value(),
+		Quantity:    bus.Quantity.Value(),
 		DateCreated: bus.DateCreated.UTC(),
 		DateUpdated: bus.DateUpdated.UTC(),
 	}
@@ -33,17 +36,27 @@ func toDBProduct(bus productbus.Product) product {
 }
 
 func toBusProduct(db product) (productbus.Product, error) {
-	name, err := productbus.Names.Parse(db.Name)
+	name, err := name.Parse(db.Name)
 	if err != nil {
 		return productbus.Product{}, fmt.Errorf("parse name: %w", err)
+	}
+
+	cost, err := money.Parse(db.Cost)
+	if err != nil {
+		return productbus.Product{}, fmt.Errorf("parse cost: %w", err)
+	}
+
+	quantity, err := quantity.Parse(db.Quantity)
+	if err != nil {
+		return productbus.Product{}, fmt.Errorf("parse quantity: %w", err)
 	}
 
 	bus := productbus.Product{
 		ID:          db.ID,
 		UserID:      db.UserID,
 		Name:        name,
-		Cost:        db.Cost,
-		Quantity:    db.Quantity,
+		Cost:        cost,
+		Quantity:    quantity,
 		DateCreated: db.DateCreated.In(time.Local),
 		DateUpdated: db.DateUpdated.In(time.Local),
 	}

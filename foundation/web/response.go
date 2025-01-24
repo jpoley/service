@@ -6,24 +6,34 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/ardanlabs/service/foundation/tracer"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+// NoResponse tells the Respond function to not respond to the request. In these
+// cases the app layer code has already done so.
+type NoResponse struct{}
+
+// NewNoResponse constructs a no reponse value.
+func NewNoResponse() NoResponse {
+	return NoResponse{}
+}
+
+// Encode implements the Encoder interface
+func (NoResponse) Encode() ([]byte, string, error) {
+	return nil, "", nil
+}
+
+// =============================================================================
 
 type httpStatus interface {
 	HTTPStatus() int
 }
 
-func respondError(ctx context.Context, w http.ResponseWriter, err error) error {
-	data, ok := err.(Encoder)
-	if !ok {
-		return fmt.Errorf("error value does not implement the encoder interface: %T", err)
+// Respond sends a response to the client.
+func Respond(ctx context.Context, w http.ResponseWriter, dataModel Encoder) error {
+	if _, ok := dataModel.(NoResponse); ok {
+		return nil
 	}
-
-	return respond(ctx, w, data)
-}
-
-func respond(ctx context.Context, w http.ResponseWriter, dataModel Encoder) error {
 
 	// If the context has been canceled, it means the client is no longer
 	// waiting for a response.
@@ -48,7 +58,7 @@ func respond(ctx context.Context, w http.ResponseWriter, dataModel Encoder) erro
 		}
 	}
 
-	_, span := tracer.AddSpan(ctx, "foundation.response", attribute.Int("status", statusCode))
+	_, span := addSpan(ctx, "web.send.response", attribute.Int("status", statusCode))
 	defer span.End()
 
 	if statusCode == http.StatusNoContent {
@@ -58,6 +68,7 @@ func respond(ctx context.Context, w http.ResponseWriter, dataModel Encoder) erro
 
 	data, contentType, err := dataModel.Encode()
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		return fmt.Errorf("respond: encode: %w", err)
 	}
 

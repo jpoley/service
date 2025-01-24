@@ -3,6 +3,7 @@ package mid
 import (
 	"context"
 	"encoding/base64"
+	"net/http"
 	"net/mail"
 	"strings"
 	"time"
@@ -11,85 +12,111 @@ import (
 	"github.com/ardanlabs/service/app/sdk/authclient"
 	"github.com/ardanlabs/service/app/sdk/errs"
 	"github.com/ardanlabs/service/business/domain/userbus"
-	"github.com/ardanlabs/service/foundation/logger"
+	"github.com/ardanlabs/service/business/types/role"
+	"github.com/ardanlabs/service/foundation/web"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 )
 
-// Authenticate validates authentication via the auth service.
-func Authenticate(ctx context.Context, log *logger.Logger, client *authclient.Client, authorization string, next HandlerFunc) (Encoder, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+// Authenticate is a middleware function that integrates with an authentication client
+// to validate user credentials and attach user data to the request context.
+func Authenticate(client *authclient.Client) web.MidFunc {
+	m := func(next web.HandlerFunc) web.HandlerFunc {
+		h := func(ctx context.Context, r *http.Request) web.Encoder {
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
 
-	resp, err := client.Authenticate(ctx, authorization)
-	if err != nil {
-		return nil, errs.New(errs.Unauthenticated, err)
+			resp, err := client.Authenticate(ctx, r.Header.Get("authorization"))
+			if err != nil {
+				return errs.New(errs.Unauthenticated, err)
+			}
+
+			ctx = setUserID(ctx, resp.UserID)
+			ctx = setClaims(ctx, resp.Claims)
+
+			return next(ctx, r)
+		}
+
+		return h
 	}
 
-	ctx = setUserID(ctx, resp.UserID)
-	ctx = setClaims(ctx, resp.Claims)
-
-	return next(ctx)
+	return m
 }
 
 // Bearer processes JWT authentication logic.
-func Bearer(ctx context.Context, ath *auth.Auth, authorization string, next HandlerFunc) (Encoder, error) {
-	claims, err := ath.Authenticate(ctx, authorization)
-	if err != nil {
-		return nil, errs.New(errs.Unauthenticated, err)
+func Bearer(ath *auth.Auth) web.MidFunc {
+	m := func(next web.HandlerFunc) web.HandlerFunc {
+		h := func(ctx context.Context, r *http.Request) web.Encoder {
+			claims, err := ath.Authenticate(ctx, r.Header.Get("authorization"))
+			if err != nil {
+				return errs.New(errs.Unauthenticated, err)
+			}
+
+			if claims.Subject == "" {
+				return errs.Newf(errs.Unauthenticated, "authorize: you are not authorized for that action, no claims")
+			}
+
+			subjectID, err := uuid.Parse(claims.Subject)
+			if err != nil {
+				return errs.Newf(errs.Unauthenticated, "parsing subject: %s", err)
+			}
+
+			ctx = setUserID(ctx, subjectID)
+			ctx = setClaims(ctx, claims)
+
+			return next(ctx, r)
+		}
+
+		return h
 	}
 
-	if claims.Subject == "" {
-		return nil, errs.Newf(errs.Unauthenticated, "authorize: you are not authorized for that action, no claims")
-	}
-
-	subjectID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		return nil, errs.Newf(errs.Unauthenticated, "parsing subject: %s", err)
-	}
-
-	ctx = setUserID(ctx, subjectID)
-	ctx = setClaims(ctx, claims)
-
-	return next(ctx)
+	return m
 }
 
 // Basic processes basic authentication logic.
-func Basic(ctx context.Context, ath *auth.Auth, userBus *userbus.Business, authorization string, next HandlerFunc) (Encoder, error) {
-	email, pass, ok := parseBasicAuth(authorization)
-	if !ok {
-		return nil, errs.Newf(errs.Unauthenticated, "invalid Basic auth")
+func Basic(ath *auth.Auth, userBus *userbus.Business) web.MidFunc {
+	m := func(next web.HandlerFunc) web.HandlerFunc {
+		h := func(ctx context.Context, r *http.Request) web.Encoder {
+			email, pass, ok := parseBasicAuth(r.Header.Get("authorization"))
+			if !ok {
+				return errs.Newf(errs.Unauthenticated, "invalid Basic auth")
+			}
+
+			addr, err := mail.ParseAddress(email)
+			if err != nil {
+				return errs.New(errs.Unauthenticated, err)
+			}
+
+			usr, err := userBus.Authenticate(ctx, *addr, pass)
+			if err != nil {
+				return errs.New(errs.Unauthenticated, err)
+			}
+
+			claims := auth.Claims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Subject:   usr.ID.String(),
+					Issuer:    ath.Issuer(),
+					ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(8760 * time.Hour)),
+					IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+				},
+				Roles: role.ParseToString(usr.Roles),
+			}
+
+			subjectID, err := uuid.Parse(claims.Subject)
+			if err != nil {
+				return errs.Newf(errs.Unauthenticated, "parsing subject: %s", err)
+			}
+
+			ctx = setUserID(ctx, subjectID)
+			ctx = setClaims(ctx, claims)
+
+			return next(ctx, r)
+		}
+
+		return h
 	}
 
-	addr, err := mail.ParseAddress(email)
-	if err != nil {
-		return nil, errs.New(errs.Unauthenticated, err)
-	}
-
-	usr, err := userBus.Authenticate(ctx, *addr, pass)
-	if err != nil {
-		return nil, errs.New(errs.Unauthenticated, err)
-	}
-
-	claims := auth.Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   usr.ID.String(),
-			Issuer:    ath.Issuer(),
-			ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(8760 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-		},
-		Roles: usr.Roles,
-	}
-
-	subjectID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		return nil, errs.Newf(errs.Unauthenticated, "parsing subject: %s", err)
-	}
-
-	ctx = setUserID(ctx, subjectID)
-	ctx = setClaims(ctx, claims)
-
-	return next(ctx)
+	return m
 }
 
 func parseBasicAuth(auth string) (string, string, bool) {

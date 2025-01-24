@@ -3,7 +3,6 @@ package vproductbus_test
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
 	"sort"
 	"testing"
 	"time"
@@ -14,20 +13,14 @@ import (
 	"github.com/ardanlabs/service/business/sdk/dbtest"
 	"github.com/ardanlabs/service/business/sdk/page"
 	"github.com/ardanlabs/service/business/sdk/unitest"
+	"github.com/ardanlabs/service/business/types/role"
 	"github.com/google/go-cmp/cmp"
 )
 
 func Test_VProduct(t *testing.T) {
 	t.Parallel()
 
-	db := dbtest.NewDatabase(t, "Test_Product")
-	defer func() {
-		if r := recover(); r != nil {
-			t.Log(r)
-			t.Error(string(debug.Stack()))
-		}
-		db.Teardown()
-	}()
+	db := dbtest.New(t, "Test_Product")
 
 	sd, err := insertSeedData(db.BusDomain)
 	if err != nil {
@@ -44,7 +37,7 @@ func Test_VProduct(t *testing.T) {
 func insertSeedData(busDomain dbtest.BusDomain) (unitest.SeedData, error) {
 	ctx := context.Background()
 
-	usrs, err := userbus.TestSeedUsers(ctx, 1, userbus.Roles.User, busDomain.User)
+	usrs, err := userbus.TestSeedUsers(ctx, 1, role.User, busDomain.User)
 	if err != nil {
 		return unitest.SeedData{}, fmt.Errorf("seeding users : %w", err)
 	}
@@ -61,7 +54,7 @@ func insertSeedData(busDomain dbtest.BusDomain) (unitest.SeedData, error) {
 
 	// -------------------------------------------------------------------------
 
-	usrs, err = userbus.TestSeedUsers(ctx, 1, userbus.Roles.Admin, busDomain.User)
+	usrs, err = userbus.TestSeedUsers(ctx, 1, role.Admin, busDomain.User)
 	if err != nil {
 		return unitest.SeedData{}, fmt.Errorf("seeding users : %w", err)
 	}
@@ -126,7 +119,7 @@ func query(busDomain dbtest.BusDomain, sd unitest.SeedData) []unitest.Table {
 			ExpResp: prds,
 			ExcFunc: func(ctx context.Context) any {
 				filter := vproductbus.QueryFilter{
-					Name: dbtest.ProductNamePointer("Name"),
+					Name: dbtest.NamePointer("Name"),
 				}
 
 				resp, err := busDomain.VProduct.Query(ctx, filter, vproductbus.DefaultOrderBy, page.MustParse("1", "10"))

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/ardanlabs/service/foundation/logger"
-	"github.com/ardanlabs/service/foundation/tracer"
+	"github.com/ardanlabs/service/foundation/otel"
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -87,13 +87,13 @@ func StatusCheck(ctx context.Context, db *sqlx.DB) error {
 		defer cancel()
 	}
 
-	var pingError error
 	for attempts := 1; ; attempts++ {
-		pingError = db.Ping()
-		if pingError == nil {
+		if err := db.Ping(); err == nil {
 			break
 		}
+
 		time.Sleep(time.Duration(attempts) * 100 * time.Millisecond)
+
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -132,7 +132,7 @@ func NamedExecContext(ctx context.Context, log *logger.Logger, db sqlx.ExtContex
 		}
 	}()
 
-	ctx, span := tracer.AddSpan(ctx, "business.api.sqldb.exec", attribute.String("query", q))
+	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.exec", attribute.String("query", q))
 	defer span.End()
 
 	if _, err := sqlx.NamedExecContext(ctx, db, query, data); err != nil {
@@ -180,7 +180,7 @@ func namedQuerySlice[T any](ctx context.Context, log *logger.Logger, db sqlx.Ext
 		}
 	}()
 
-	ctx, span := tracer.AddSpan(ctx, "business.api.sqldb.queryslice", attribute.String("query", q))
+	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.queryslice", attribute.String("query", q))
 	defer span.End()
 
 	var rows *sqlx.Rows
@@ -256,7 +256,7 @@ func namedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContex
 		}
 	}()
 
-	ctx, span := tracer.AddSpan(ctx, "business.api.sqldb.query", attribute.String("query", q))
+	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.query", attribute.String("query", q))
 	defer span.End()
 
 	var rows *sqlx.Rows

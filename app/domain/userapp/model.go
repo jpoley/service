@@ -8,22 +8,9 @@ import (
 
 	"github.com/ardanlabs/service/app/sdk/errs"
 	"github.com/ardanlabs/service/business/domain/userbus"
-	"github.com/ardanlabs/service/foundation/validate"
+	"github.com/ardanlabs/service/business/types/name"
+	"github.com/ardanlabs/service/business/types/role"
 )
-
-// QueryParams represents the set of possible query strings.
-type QueryParams struct {
-	Page             string
-	Rows             string
-	OrderBy          string
-	ID               string
-	Name             string
-	Email            string
-	StartCreatedDate string
-	EndCreatedDate   string
-}
-
-// =============================================================================
 
 // User represents information about an individual user.
 type User struct {
@@ -38,25 +25,20 @@ type User struct {
 	DateUpdated  string   `json:"dateUpdated"`
 }
 
-// Encode implments the encoder interface.
+// Encode implements the encoder interface.
 func (app User) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(app)
 	return data, "application/json", err
 }
 
 func toAppUser(bus userbus.User) User {
-	roles := make([]string, len(bus.Roles))
-	for i, role := range bus.Roles {
-		roles[i] = role.String()
-	}
-
 	return User{
 		ID:           bus.ID.String(),
 		Name:         bus.Name.String(),
 		Email:        bus.Email.Address,
-		Roles:        roles,
+		Roles:        role.ParseToString(bus.Roles),
 		PasswordHash: bus.PasswordHash,
-		Department:   bus.Department,
+		Department:   bus.Department.String(),
 		Enabled:      bus.Enabled,
 		DateCreated:  bus.DateCreated.Format(time.RFC3339),
 		DateUpdated:  bus.DateUpdated.Format(time.RFC3339),
@@ -84,28 +66,24 @@ type NewUser struct {
 	PasswordConfirm string   `json:"passwordConfirm" validate:"eqfield=Password"`
 }
 
-// Decode implments the decoder interface.
+// Decode implements the decoder interface.
 func (app *NewUser) Decode(data []byte) error {
-	return json.Unmarshal(data, &app)
+	return json.Unmarshal(data, app)
 }
 
 // Validate checks the data in the model is considered clean.
 func (app NewUser) Validate() error {
-	if err := validate.Check(app); err != nil {
-		return errs.Newf(errs.FailedPrecondition, "validate: %s", err)
+	if err := errs.Check(app); err != nil {
+		return fmt.Errorf("validate: %w", err)
 	}
 
 	return nil
 }
 
 func toBusNewUser(app NewUser) (userbus.NewUser, error) {
-	roles := make([]userbus.Role, len(app.Roles))
-	for i, roleStr := range app.Roles {
-		role, err := userbus.Roles.Parse(roleStr)
-		if err != nil {
-			return userbus.NewUser{}, fmt.Errorf("parse: %w", err)
-		}
-		roles[i] = role
+	roles, err := role.ParseMany(app.Roles)
+	if err != nil {
+		return userbus.NewUser{}, fmt.Errorf("parse: %w", err)
 	}
 
 	addr, err := mail.ParseAddress(app.Email)
@@ -113,16 +91,21 @@ func toBusNewUser(app NewUser) (userbus.NewUser, error) {
 		return userbus.NewUser{}, fmt.Errorf("parse: %w", err)
 	}
 
-	name, err := userbus.Names.Parse(app.Name)
+	nme, err := name.Parse(app.Name)
+	if err != nil {
+		return userbus.NewUser{}, fmt.Errorf("parse: %w", err)
+	}
+
+	department, err := name.ParseNull(app.Department)
 	if err != nil {
 		return userbus.NewUser{}, fmt.Errorf("parse: %w", err)
 	}
 
 	bus := userbus.NewUser{
-		Name:       name,
+		Name:       nme,
 		Email:      *addr,
 		Roles:      roles,
-		Department: app.Department,
+		Department: department,
 		Password:   app.Password,
 	}
 
@@ -136,30 +119,27 @@ type UpdateUserRole struct {
 	Roles []string `json:"roles" validate:"required"`
 }
 
-// Decode implments the decoder interface.
+// Decode implements the decoder interface.
 func (app *UpdateUserRole) Decode(data []byte) error {
-	return json.Unmarshal(data, &app)
+	return json.Unmarshal(data, app)
 }
 
 // Validate checks the data in the model is considered clean.
 func (app UpdateUserRole) Validate() error {
-	if err := validate.Check(app); err != nil {
-		return errs.Newf(errs.FailedPrecondition, "validate: %s", err)
+	if err := errs.Check(app); err != nil {
+		return fmt.Errorf("validate: %w", err)
 	}
 
 	return nil
 }
 
 func toBusUpdateUserRole(app UpdateUserRole) (userbus.UpdateUser, error) {
-	var roles []userbus.Role
+	var roles []role.Role
 	if app.Roles != nil {
-		roles = make([]userbus.Role, len(app.Roles))
-		for i, roleStr := range app.Roles {
-			role, err := userbus.Roles.Parse(roleStr)
-			if err != nil {
-				return userbus.UpdateUser{}, fmt.Errorf("parse: %w", err)
-			}
-			roles[i] = role
+		var err error
+		roles, err = role.ParseMany(app.Roles)
+		if err != nil {
+			return userbus.UpdateUser{}, fmt.Errorf("parse: %w", err)
 		}
 	}
 
@@ -182,15 +162,15 @@ type UpdateUser struct {
 	Enabled         *bool   `json:"enabled"`
 }
 
-// Decode implments the decoder interface.
+// Decode implements the decoder interface.
 func (app *UpdateUser) Decode(data []byte) error {
-	return json.Unmarshal(data, &app)
+	return json.Unmarshal(data, app)
 }
 
 // Validate checks the data in the model is considered clean.
 func (app UpdateUser) Validate() error {
-	if err := validate.Check(app); err != nil {
-		return errs.Newf(errs.FailedPrecondition, "validate: %s", err)
+	if err := errs.Check(app); err != nil {
+		return fmt.Errorf("validate: %w", err)
 	}
 
 	return nil
@@ -206,19 +186,28 @@ func toBusUpdateUser(app UpdateUser) (userbus.UpdateUser, error) {
 		}
 	}
 
-	var name *userbus.Name
+	var nme *name.Name
 	if app.Name != nil {
-		nm, err := userbus.Names.Parse(*app.Name)
+		nm, err := name.Parse(*app.Name)
 		if err != nil {
 			return userbus.UpdateUser{}, fmt.Errorf("parse: %w", err)
 		}
-		name = &nm
+		nme = &nm
+	}
+
+	var department *name.Null
+	if app.Department != nil {
+		dep, err := name.ParseNull(*app.Department)
+		if err != nil {
+			return userbus.UpdateUser{}, fmt.Errorf("parse: %w", err)
+		}
+		department = &dep
 	}
 
 	bus := userbus.UpdateUser{
-		Name:       name,
+		Name:       nme,
 		Email:      addr,
-		Department: app.Department,
+		Department: department,
 		Password:   app.Password,
 		Enabled:    app.Enabled,
 	}

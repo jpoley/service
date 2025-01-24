@@ -15,20 +15,20 @@ import (
 
 	"github.com/ardanlabs/service/app/sdk/errs"
 	"github.com/ardanlabs/service/foundation/logger"
-	"github.com/ardanlabs/service/foundation/tracer"
+	"github.com/ardanlabs/service/foundation/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 // This provides a default client configuration, but it's recommended
 // this is replaced by the user with application specific settings using
 // the WithClient function at the time a AuthAPI is constructed.
+// DualStack Deprecated: Fast Fallback is enabled by default. To disable, set FallbackDelay to a negative value.
 var defaultClient = http.Client{
 	Transport: &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 15 * time.Second,
-			DualStack: true,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
@@ -109,7 +109,7 @@ func (cln *Client) do(ctx context.Context, method string, endpoint string, heade
 		cln.log.Info(ctx, "authclient: rawRequest: completed", "status", statusCode)
 	}()
 
-	ctx, span := tracer.AddSpan(ctx, fmt.Sprintf("app.api.authclient.%s", base), attribute.String("endpoint", endpoint))
+	ctx, span := otel.AddSpan(ctx, fmt.Sprintf("app.sdk.authclient.%s", base), attribute.String("endpoint", endpoint))
 	defer func() {
 		span.SetAttributes(attribute.Int("status", statusCode))
 		span.End()
@@ -135,13 +135,15 @@ func (cln *Client) do(ctx context.Context, method string, endpoint string, heade
 		req.Header.Set(key, value)
 	}
 
+	otel.AddTraceToRequest(ctx, req)
+
 	resp, err := cln.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("do: error: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Assign for logging the status code at the end of the function call.
+	// Assign so it can be logged in the defer above.
 	statusCode = resp.StatusCode
 
 	if statusCode == http.StatusNoContent {

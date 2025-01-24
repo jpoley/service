@@ -17,7 +17,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/v1/rego"
 )
 
 // ErrForbidden is returned when a auth issue is identified.
@@ -26,17 +26,7 @@ var ErrForbidden = errors.New("attempted action is not allowed")
 // Claims represents the authorization claims transmitted via a JWT.
 type Claims struct {
 	jwt.RegisteredClaims
-	Roles []userbus.Role `json:"roles"`
-}
-
-// HasRole checks if the specified role exists.
-func (c Claims) HasRole(r userbus.Role) bool {
-	for _, role := range c.Roles {
-		if role == r {
-			return true
-		}
-	}
-	return false
+	Roles []string `json:"roles"`
 }
 
 // KeyLookup declares a method set of behavior for looking up
@@ -58,6 +48,7 @@ type Config struct {
 // Auth is used to authenticate clients. It can generate a token for a
 // set of user claims and recreate the claims by parsing the token.
 type Auth struct {
+	log       *logger.Logger
 	keyLookup KeyLookup
 	userBus   *userbus.Business
 	method    jwt.SigningMethod
@@ -76,6 +67,7 @@ func New(cfg Config) (*Auth, error) {
 	}
 
 	a := Auth{
+		log:       cfg.Log,
 		keyLookup: cfg.KeyLookup,
 		userBus:   userBus,
 		method:    jwt.GetSigningMethod(jwt.SigningMethodRS256.Name),
@@ -116,13 +108,14 @@ func (a *Auth) GenerateToken(kid string, claims Claims) (string, error) {
 
 // Authenticate processes the token to validate the sender's token is valid.
 func (a *Auth) Authenticate(ctx context.Context, bearerToken string) (Claims, error) {
-	parts := strings.Split(bearerToken, " ")
-	if len(parts) != 2 || parts[0] != "Bearer" {
+	if !strings.HasPrefix(bearerToken, "Bearer ") {
 		return Claims{}, errors.New("expected authorization header format: Bearer <token>")
 	}
 
+	jwt := bearerToken[7:]
+
 	var claims Claims
-	token, _, err := a.parser.ParseUnverified(parts[1], &claims)
+	token, _, err := a.parser.ParseUnverified(jwt, &claims)
 	if err != nil {
 		return Claims{}, fmt.Errorf("error parsing token: %w", err)
 	}
@@ -144,11 +137,12 @@ func (a *Auth) Authenticate(ctx context.Context, bearerToken string) (Claims, er
 
 	input := map[string]any{
 		"Key":   pem,
-		"Token": parts[1],
+		"Token": jwt,
 		"ISS":   a.issuer,
 	}
 
 	if err := a.opaPolicyEvaluation(ctx, regoAuthentication, RuleAuthenticate, input); err != nil {
+		a.log.Info(ctx, "**Authenticate-FAILED**", "token", jwt)
 		return Claims{}, fmt.Errorf("authentication failed : %w", err)
 	}
 

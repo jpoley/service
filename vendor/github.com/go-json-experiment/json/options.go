@@ -88,8 +88,8 @@ func JoinOptions(srcs ...Options) Options {
 //	v, ok := json.GetOption(opts, json.Deterministic)
 //
 // Options are most commonly introspected to alter the JSON representation of
-// [MarshalerV2.MarshalJSONV2] and [MarshalerV2.MarshalJSONV2] methods, and
-// [MarshalFuncV2] and [UnmarshalFuncV2] functions.
+// [MarshalerTo.MarshalJSONTo] and [UnmarshalerFrom.UnmarshalJSONFrom] methods, and
+// [MarshalToFunc] and [UnmarshalFromFunc] functions.
 // In such cases, the presence bit should generally be ignored.
 func GetOption[T any](opts Options, setter func(T) Options) (T, bool) {
 	return jsonopts.GetOption(opts, setter)
@@ -164,6 +164,22 @@ func FormatNilMapAsNull(v bool) Options {
 		return jsonflags.FormatNilMapAsNull | 1
 	} else {
 		return jsonflags.FormatNilMapAsNull | 0
+	}
+}
+
+// OmitZeroStructFields specifies that a Go struct should marshal in such a way
+// that all struct fields that are zero are omitted from the marshaled output
+// if the value is zero as determined by the "IsZero() bool" method if present,
+// otherwise based on whether the field is the zero Go value.
+// This is semantically equivalent to specifying the `omitzero` tag option
+// on every field in a Go struct.
+//
+// This only affects marshaling and is ignored when unmarshaling.
+func OmitZeroStructFields(v bool) Options {
+	if v {
+		return jsonflags.OmitZeroStructFields | 1
+	} else {
+		return jsonflags.OmitZeroStructFields | 0
 	}
 }
 
