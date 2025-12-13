@@ -63,7 +63,7 @@ func create400(sd apitest.SeedData) []apitest.Table {
 			StatusCode: http.StatusBadRequest,
 			Input:      &userapp.NewUser{},
 			GotResp:    &errs.Error{},
-			ExpResp:    errs.Newf(errs.InvalidArgument, "validate: [{\"field\":\"name\",\"error\":\"name is a required field\"},{\"field\":\"email\",\"error\":\"email is a required field\"},{\"field\":\"roles\",\"error\":\"roles is a required field\"},{\"field\":\"password\",\"error\":\"password is a required field\"}]"),
+			ExpResp:    errs.Errorf(errs.InvalidArgument, "validate: [{\"field\":\"email\",\"error\":\"mail: no address\"},{\"field\":\"name\",\"error\":\"invalid name \\\"\\\"\"},{\"field\":\"password\",\"error\":\"invalid password \\\"\\\"\"}]"),
 			CmpFunc: func(got any, exp any) string {
 				return cmp.Diff(got, exp)
 			},
@@ -83,7 +83,7 @@ func create400(sd apitest.SeedData) []apitest.Table {
 				PasswordConfirm: "123",
 			},
 			GotResp: &errs.Error{},
-			ExpResp: errs.Newf(errs.InvalidArgument, "parse: invalid role \"SUPER\""),
+			ExpResp: errs.Errorf(errs.InvalidArgument, "validate: [{\"field\":\"roles\",\"error\":\"invalid role \\\"SUPER\\\"\"}]"),
 			CmpFunc: func(got any, exp any) string {
 				return cmp.Diff(got, exp)
 			},
@@ -103,7 +103,7 @@ func create400(sd apitest.SeedData) []apitest.Table {
 				PasswordConfirm: "123",
 			},
 			GotResp: &errs.Error{},
-			ExpResp: errs.Newf(errs.InvalidArgument, "parse: invalid name \"Bi\""),
+			ExpResp: errs.Errorf(errs.InvalidArgument, "validate: [{\"field\":\"name\",\"error\":\"invalid name \\\"Bi\\\"\"}]"),
 			CmpFunc: func(got any, exp any) string {
 				return cmp.Diff(got, exp)
 			},
@@ -122,7 +122,7 @@ func create401(sd apitest.SeedData) []apitest.Table {
 			Method:     http.MethodPost,
 			StatusCode: http.StatusUnauthorized,
 			GotResp:    &errs.Error{},
-			ExpResp:    errs.Newf(errs.Unauthenticated, "error parsing token: token contains an invalid number of segments"),
+			ExpResp:    errs.Errorf(errs.Unauthenticated, "error parsing token: token contains an invalid number of segments"),
 			CmpFunc: func(got any, exp any) string {
 				return cmp.Diff(got, exp)
 			},
@@ -134,7 +134,7 @@ func create401(sd apitest.SeedData) []apitest.Table {
 			Method:     http.MethodPost,
 			StatusCode: http.StatusUnauthorized,
 			GotResp:    &errs.Error{},
-			ExpResp:    errs.Newf(errs.Unauthenticated, "error parsing token: token contains an invalid number of segments"),
+			ExpResp:    errs.Errorf(errs.Unauthenticated, "error parsing token: token contains an invalid number of segments"),
 			CmpFunc: func(got any, exp any) string {
 				return cmp.Diff(got, exp)
 			},
@@ -146,7 +146,7 @@ func create401(sd apitest.SeedData) []apitest.Table {
 			Method:     http.MethodPost,
 			StatusCode: http.StatusUnauthorized,
 			GotResp:    &errs.Error{},
-			ExpResp:    errs.Newf(errs.Unauthenticated, "authentication failed : bindings results[[{[true] map[x:false]}]] ok[true]"),
+			ExpResp:    errs.Errorf(errs.Unauthenticated, "authentication failed: OPA policy evaluation failed for authentication: OPA policy rule \"auth\" not satisfied"),
 			CmpFunc: func(got any, exp any) string {
 				return cmp.Diff(got, exp)
 			},
@@ -158,7 +158,7 @@ func create401(sd apitest.SeedData) []apitest.Table {
 			Method:     http.MethodPost,
 			StatusCode: http.StatusUnauthorized,
 			GotResp:    &errs.Error{},
-			ExpResp:    errs.Newf(errs.Unauthenticated, "authorize: you are not authorized for that action, claims[[USER]] rule[rule_admin_only]: rego evaluation failed : bindings results[[{[true] map[x:false]}]] ok[true]"),
+			ExpResp:    errs.Errorf(errs.Unauthenticated, "authorize: you are not authorized for that action, claims[[USER]] rule[rule_admin_only]"),
 			CmpFunc: func(got any, exp any) string {
 				return cmp.Diff(got, exp)
 			},

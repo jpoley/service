@@ -13,17 +13,22 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
-	"github.com/ardanlabs/service/api/services/auth/build/all"
+	"github.com/ardanlabs/service/api/services/auth/build"
+	"github.com/ardanlabs/service/app/domain/grpcauthapp"
 	"github.com/ardanlabs/service/app/sdk/auth"
 	"github.com/ardanlabs/service/app/sdk/debug"
 	"github.com/ardanlabs/service/app/sdk/mux"
+	"github.com/ardanlabs/service/business/domain/userbus"
+	"github.com/ardanlabs/service/business/domain/userbus/stores/usercache"
+	"github.com/ardanlabs/service/business/domain/userbus/stores/userdb"
+	"github.com/ardanlabs/service/business/sdk/delegate"
 	"github.com/ardanlabs/service/business/sdk/sqldb"
 	"github.com/ardanlabs/service/foundation/keystore"
 	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/ardanlabs/service/foundation/otel"
 )
 
-var build = "develop"
+var tag = "develop"
 
 func main() {
 	var log *logger.Logger
@@ -34,11 +39,7 @@ func main() {
 		},
 	}
 
-	traceIDFn := func(ctx context.Context) string {
-		return otel.GetTraceID(ctx)
-	}
-
-	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "AUTH", traceIDFn, events)
+	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "AUTH", otel.GetTraceID, events)
 
 	// -------------------------------------------------------------------------
 
@@ -72,7 +73,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			CORSAllowedOrigins []string      `conf:"default:*"`
 		}
 		Auth struct {
-			KeysEnvVar string
+			KeysJSON   string `conf:"mask"`
 			KeysFolder string `conf:"default:zarf/keys/"`
 			ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
 			Issuer     string `conf:"default:service project"`
@@ -93,7 +94,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 		}
 	}{
 		Version: conf.Version{
-			Build: build,
+			Build: tag,
 			Desc:  "Auth",
 		},
 	}
@@ -145,6 +146,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 	defer db.Close()
 
 	// -------------------------------------------------------------------------
+	// Create Business Packages
+
+	delegate := delegate.New(log)
+	userBus := userbus.NewBusiness(log, delegate, usercache.NewStore(log, userdb.NewStore(log, db), time.Minute))
+
+	// -------------------------------------------------------------------------
 	// Initialize authentication support
 
 	log.Info(ctx, "startup", "status", "initializing authentication support")
@@ -156,7 +163,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 	ks := keystore.New()
 
-	n1, err := ks.LoadByJSON(cfg.Auth.KeysEnvVar)
+	n1, err := ks.LoadByJSON(cfg.Auth.KeysJSON)
 	if err != nil {
 		return fmt.Errorf("loading keys by env: %w", err)
 	}
@@ -167,27 +174,24 @@ func run(ctx context.Context, log *logger.Logger) error {
 	}
 
 	if n1+n2 == 0 {
-		return fmt.Errorf("no keys exist: %w", err)
+		return errors.New("no keys exist")
 	}
 
 	authCfg := auth.Config{
 		Log:       log,
-		DB:        db,
+		UserBus:   userBus,
 		KeyLookup: ks,
 		Issuer:    cfg.Auth.Issuer,
 	}
 
-	ath, err := auth.New(authCfg)
-	if err != nil {
-		return fmt.Errorf("constructing auth: %w", err)
-	}
+	ath := auth.New(authCfg)
 
 	// -------------------------------------------------------------------------
 	// Start Tracing Support
 
 	log.Info(ctx, "startup", "status", "initializing tracing support")
 
-	traceProvider, teardown, err := otel.InitTracing(log, otel.Config{
+	traceProvider, teardown, err := otel.InitTracing(otel.Config{
 		ServiceName: cfg.Tempo.ServiceName,
 		Host:        cfg.Tempo.Host,
 		ExcludedRoutes: map[string]struct{}{
@@ -224,10 +228,13 @@ func run(ctx context.Context, log *logger.Logger) error {
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	cfgMux := mux.Config{
-		Build:  build,
+		Build:  tag,
 		Log:    log,
 		DB:     db,
 		Tracer: tracer,
+		BusConfig: mux.BusConfig{
+			UserBus: userBus,
+		},
 		AuthConfig: mux.AuthConfig{
 			Auth: ath,
 		},
@@ -235,7 +242,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 	api := http.Server{
 		Addr:         cfg.Web.APIHost,
-		Handler:      mux.WebAPI(cfgMux, all.Routes(), mux.WithCORS(cfg.Web.CORSAllowedOrigins)),
+		Handler:      mux.WebAPI(cfgMux, build.Routes(), mux.WithCORS(cfg.Web.CORSAllowedOrigins)),
 		ReadTimeout:  cfg.Web.ReadTimeout,
 		WriteTimeout: cfg.Web.WriteTimeout,
 		IdleTimeout:  cfg.Web.IdleTimeout,
@@ -251,6 +258,28 @@ func run(ctx context.Context, log *logger.Logger) error {
 	}()
 
 	// -------------------------------------------------------------------------
+	// Start gRPC Service
+
+	log.Info(ctx, "startup", "status", "initializing gRPC support")
+
+	grpcService, err := grpcauthapp.New(grpcauthapp.Config{
+		Log:     log,
+		Auth:    ath,
+		UserBus: userBus,
+		Host:    "0.0.0.0:6001",
+		APIHost: cfg.Web.APIHost,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create gRPC service: %w", err)
+	}
+
+	go func() {
+		if err := grpcService.Start(); err != nil {
+			log.Error(ctx, "startup", "status", "gRPC server error", "err", err)
+		}
+	}()
+
+	// -------------------------------------------------------------------------
 	// Shutdown
 
 	select {
@@ -260,6 +289,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 	case sig := <-shutdown:
 		log.Info(ctx, "shutdown", "status", "shutdown started", "signal", sig)
 		defer log.Info(ctx, "shutdown", "status", "shutdown complete", "signal", sig)
+
+		grpcService.Stop()
 
 		ctx, cancel := context.WithTimeout(ctx, cfg.Web.ShutdownTimeout)
 		defer cancel()

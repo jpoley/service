@@ -3,7 +3,6 @@ package errs
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"runtime"
 )
@@ -11,11 +10,6 @@ import (
 // ErrCode represents an error code in the system.
 type ErrCode struct {
 	value int
-}
-
-// Value returns the integer value of the error code.
-func (ec ErrCode) Value() int {
-	return ec.value
 }
 
 // String returns the string representation of the error code.
@@ -69,8 +63,8 @@ func New(code ErrCode, err error) *Error {
 	}
 }
 
-// Newf constructs an error based on a error message.
-func Newf(code ErrCode, format string, v ...any) *Error {
+// Errorf constructs an error based on a error message.
+func Errorf(code ErrCode, format string, v ...any) *Error {
 	pc, filename, line, _ := runtime.Caller(1)
 
 	return &Error{
@@ -79,17 +73,6 @@ func Newf(code ErrCode, format string, v ...any) *Error {
 		FuncName: runtime.FuncForPC(pc).Name(),
 		FileName: fmt.Sprintf("%s:%d", filename, line),
 	}
-}
-
-// NewError checks for an Error in the error interface value. If it doesn't
-// exist, will create one from the error.
-func NewError(err error) *Error {
-	var errsErr *Error
-	if errors.As(err, &errsErr) {
-		return errsErr
-	}
-
-	return New(Internal, err)
 }
 
 // Error implements the error interface.

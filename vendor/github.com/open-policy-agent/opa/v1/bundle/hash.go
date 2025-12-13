@@ -14,8 +14,9 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"sort"
 	"strings"
+
+	"github.com/open-policy-agent/opa/v1/util"
 )
 
 // HashingAlgorithm represents a subset of hashing algorithms implemented in Go
@@ -40,7 +41,7 @@ func (alg HashingAlgorithm) String() string {
 
 // SignatureHasher computes a signature digest for a file with (structured or unstructured) data and policy
 type SignatureHasher interface {
-	HashFile(v interface{}) ([]byte, error)
+	HashFile(v any) ([]byte, error)
 }
 
 type hasher struct {
@@ -76,7 +77,7 @@ func NewSignatureHasher(alg HashingAlgorithm) (SignatureHasher, error) {
 }
 
 // HashFile hashes the file content, JSON or binary, both in golang native format.
-func (h *hasher) HashFile(v interface{}) ([]byte, error) {
+func (h *hasher) HashFile(v any) ([]byte, error) {
 	hf := h.h()
 	walk(v, hf)
 	return hf.Sum(nil), nil
@@ -91,19 +92,13 @@ func (h *hasher) HashFile(v interface{}) ([]byte, error) {
 // object: Hash {, then each key (in alphabetical order) and digest of the value, then comma (between items) and finally }.
 //
 // array: Hash [, then digest of the value, then comma (between items) and finally ].
-func walk(v interface{}, h io.Writer) {
+func walk(v any, h io.Writer) {
 
 	switch x := v.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		_, _ = h.Write([]byte("{"))
 
-		var keys []string
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		for i, key := range keys {
+		for i, key := range util.KeysSorted(x) {
 			if i > 0 {
 				_, _ = h.Write([]byte(","))
 			}
@@ -114,7 +109,7 @@ func walk(v interface{}, h io.Writer) {
 		}
 
 		_, _ = h.Write([]byte("}"))
-	case []interface{}:
+	case []any:
 		_, _ = h.Write([]byte("["))
 
 		for i, e := range x {
@@ -132,7 +127,7 @@ func walk(v interface{}, h io.Writer) {
 	}
 }
 
-func encodePrimitive(v interface{}) []byte {
+func encodePrimitive(v any) []byte {
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)

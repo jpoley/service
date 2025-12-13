@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/ardanlabs/service/business/types/hometype"
+	"github.com/ardanlabs/service/business/types/home"
 	"github.com/google/uuid"
 )
 
@@ -14,12 +14,12 @@ func TestGenerateNewHomes(n int, userID uuid.UUID) []NewHome {
 	newHmes := make([]NewHome, n)
 
 	idx := rand.Intn(10000)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		idx++
 
-		t := hometype.Single
+		t := home.Single
 		if v := (idx + i) % 2; v == 0 {
-			t = hometype.Condo
+			t = home.Condo
 		}
 
 		nh := NewHome{
@@ -42,7 +42,7 @@ func TestGenerateNewHomes(n int, userID uuid.UUID) []NewHome {
 }
 
 // TestGenerateSeedHomes is a helper method for testing.
-func TestGenerateSeedHomes(ctx context.Context, n int, api *Business, userID uuid.UUID) ([]Home, error) {
+func TestGenerateSeedHomes(ctx context.Context, n int, api ExtBusiness, userID uuid.UUID) ([]Home, error) {
 	newHmes := TestGenerateNewHomes(n, userID)
 
 	hmes := make([]Home, len(newHmes))

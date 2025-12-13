@@ -49,6 +49,7 @@ type FieldOptions struct {
 	Required      bool
 	Mask          bool
 	NotZero       bool
+	Immutable     bool
 }
 
 // extractFields uses reflection to examine the struct and generate the keys.
@@ -93,7 +94,7 @@ func extractFields(prefix []string, target interface{}) ([]Field, error) {
 		fieldKey := append(prefix, camelSplit(fieldName)...)
 
 		// Drill down through pointers until we bottom out at type or nil.
-		for f.Kind() == reflect.Ptr {
+		for f.Kind() == reflect.Pointer {
 			if f.IsNil() {
 
 				// It's not a struct so leave it alone.
@@ -177,6 +178,8 @@ func parseTag(tagStr string) (FieldOptions, error) {
 				f.NotZero = true
 			case "mask":
 				f.Mask = true
+			case "immutable":
+				f.Immutable = true
 			}
 		case 2:
 			tagPropVal := strings.TrimSpace(vals[1])
@@ -261,7 +264,7 @@ func camelSplit(src string) []string {
 func processField(settingDefault bool, value string, field reflect.Value) error {
 	typ := field.Type()
 
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 		if field.IsNil() {
 			field.Set(reflect.New(typ))

@@ -8,20 +8,23 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/ardanlabs/service/business/domain/userbus"
-	"github.com/ardanlabs/service/business/domain/userbus/stores/usercache"
-	"github.com/ardanlabs/service/business/domain/userbus/stores/userdb"
 	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
 	"github.com/open-policy-agent/opa/v1/rego"
 )
 
-// ErrForbidden is returned when a auth issue is identified.
-var ErrForbidden = errors.New("attempted action is not allowed")
+// Specific error variables for auth failures.
+var (
+	ErrForbidden       = errors.New("attempted action is not allowed")
+	ErrKIDMissing      = errors.New("kid missing from token header")
+	ErrKIDMalformed    = errors.New("kid in token header is malformed")
+	ErrUserDisabled    = errors.New("user is disabled")
+	ErrInvalidAuthOPA  = errors.New("OPA policy evaluation failed for authentication")
+	ErrInvalidAuthzOPA = errors.New("OPA policy evaluation failed for authorization")
+)
 
 // Claims represents the authorization claims transmitted via a JWT.
 type Claims struct {
@@ -40,7 +43,7 @@ type KeyLookup interface {
 // Config represents information required to initialize auth.
 type Config struct {
 	Log       *logger.Logger
-	DB        *sqlx.DB
+	UserBus   userbus.ExtBusiness
 	KeyLookup KeyLookup
 	Issuer    string
 }
@@ -50,32 +53,22 @@ type Config struct {
 type Auth struct {
 	log       *logger.Logger
 	keyLookup KeyLookup
-	userBus   *userbus.Business
+	userBus   userbus.ExtBusiness
 	method    jwt.SigningMethod
 	parser    *jwt.Parser
 	issuer    string
 }
 
 // New creates an Auth to support authentication/authorization.
-func New(cfg Config) (*Auth, error) {
-
-	// If a database connection is not provided, we won't perform the
-	// user enabled check.
-	var userBus *userbus.Business
-	if cfg.DB != nil {
-		userBus = userbus.NewBusiness(cfg.Log, nil, usercache.NewStore(cfg.Log, userdb.NewStore(cfg.Log, cfg.DB), 10*time.Minute))
-	}
-
-	a := Auth{
+func New(cfg Config) *Auth {
+	return &Auth{
 		log:       cfg.Log,
 		keyLookup: cfg.KeyLookup,
-		userBus:   userBus,
+		userBus:   cfg.UserBus,
 		method:    jwt.GetSigningMethod(jwt.SigningMethodRS256.Name),
 		parser:    jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Name})),
 		issuer:    cfg.Issuer,
 	}
-
-	return &a, nil
 }
 
 // Issuer provides the configured issuer used to authenticate tokens.
@@ -95,7 +88,7 @@ func (a *Auth) GenerateToken(kid string, claims Claims) (string, error) {
 
 	privateKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(privateKeyPEM))
 	if err != nil {
-		return "", fmt.Errorf("parsing private pem: %w", err)
+		return "", fmt.Errorf("parsing private key from PEM: %w", err)
 	}
 
 	str, err := token.SignedString(privateKey)
@@ -112,44 +105,44 @@ func (a *Auth) Authenticate(ctx context.Context, bearerToken string) (Claims, er
 		return Claims{}, errors.New("expected authorization header format: Bearer <token>")
 	}
 
-	jwt := bearerToken[7:]
+	jwtUnverified := bearerToken[7:]
 
 	var claims Claims
-	token, _, err := a.parser.ParseUnverified(jwt, &claims)
+	token, _, err := a.parser.ParseUnverified(jwtUnverified, &claims)
 	if err != nil {
 		return Claims{}, fmt.Errorf("error parsing token: %w", err)
 	}
 
 	kidRaw, exists := token.Header["kid"]
 	if !exists {
-		return Claims{}, fmt.Errorf("kid missing from header: %w", err)
+		return Claims{}, ErrKIDMissing
 	}
 
 	kid, ok := kidRaw.(string)
 	if !ok {
-		return Claims{}, fmt.Errorf("kid malformed: %w", err)
+		return Claims{}, ErrKIDMalformed
 	}
 
 	pem, err := a.keyLookup.PublicKey(kid)
 	if err != nil {
-		return Claims{}, fmt.Errorf("failed to fetch public key: %w", err)
+		return Claims{}, fmt.Errorf("fetching public key for kid %q: %w", kid, err)
 	}
 
 	input := map[string]any{
 		"Key":   pem,
-		"Token": jwt,
+		"Token": jwtUnverified,
 		"ISS":   a.issuer,
 	}
 
-	if err := a.opaPolicyEvaluation(ctx, regoAuthentication, RuleAuthenticate, input); err != nil {
-		a.log.Info(ctx, "**Authenticate-FAILED**", "token", jwt)
-		return Claims{}, fmt.Errorf("authentication failed : %w", err)
+	if err := a.opaPolicyEvaluation(ctx, regoAuthentication, RuleAuthenticate, input, ErrInvalidAuthOPA); err != nil {
+		a.log.Info(ctx, "**Authenticate-FAILED**", "token", jwtUnverified, "userID", claims.Subject)
+		return Claims{}, fmt.Errorf("authentication failed: %w", err)
 	}
 
 	// Check the database for this user to verify they are still enabled.
 
 	if err := a.isUserEnabled(ctx, claims); err != nil {
-		return Claims{}, fmt.Errorf("user not enabled : %w", err)
+		return Claims{}, fmt.Errorf("user not enabled: %w", err)
 	}
 
 	return claims, nil
@@ -162,11 +155,11 @@ func (a *Auth) Authorize(ctx context.Context, claims Claims, userID uuid.UUID, r
 	input := map[string]any{
 		"Roles":   claims.Roles,
 		"Subject": claims.Subject,
-		"UserID":  userID,
+		"UserID":  userID.String(),
 	}
 
-	if err := a.opaPolicyEvaluation(ctx, regoAuthorization, rule, input); err != nil {
-		return fmt.Errorf("rego evaluation failed : %w", err)
+	if err := a.opaPolicyEvaluation(ctx, regoAuthorization, rule, input, ErrInvalidAuthzOPA); err != nil {
+		return fmt.Errorf("authorization failed for rule %q: %w", rule, err)
 	}
 
 	return nil
@@ -174,7 +167,7 @@ func (a *Auth) Authorize(ctx context.Context, claims Claims, userID uuid.UUID, r
 
 // opaPolicyEvaluation asks opa to evaluate the token against the specified token
 // policy and public key.
-func (a *Auth) opaPolicyEvaluation(ctx context.Context, regoScript string, rule string, input any) error {
+func (a *Auth) opaPolicyEvaluation(ctx context.Context, regoScript string, rule string, input any, baseError error) error {
 	query := fmt.Sprintf("x = data.%s.%s", opaPackage, rule)
 
 	q, err := rego.New(
@@ -182,21 +175,22 @@ func (a *Auth) opaPolicyEvaluation(ctx context.Context, regoScript string, rule 
 		rego.Module("policy.rego", regoScript),
 	).PrepareForEval(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("OPA prepare for eval failed for rule %q: %w", rule, err)
 	}
 
 	results, err := q.Eval(ctx, rego.EvalInput(input))
 	if err != nil {
-		return fmt.Errorf("query: %w", err)
+		return fmt.Errorf("OPA eval failed for rule %q: %w", rule, err)
 	}
 
 	if len(results) == 0 {
-		return errors.New("no results")
+		return fmt.Errorf("%w: OPA policy evaluation for rule %q yielded no results", baseError, rule)
 	}
 
 	result, ok := results[0].Bindings["x"].(bool)
 	if !ok || !result {
-		return fmt.Errorf("bindings results[%v] ok[%v]", results, ok)
+		a.log.Info(ctx, "OPA policy evaluation details", "rule", rule, "results", results, "ok", ok)
+		return fmt.Errorf("%w: OPA policy rule %q not satisfied", baseError, rule)
 	}
 
 	return nil
@@ -211,7 +205,7 @@ func (a *Auth) isUserEnabled(ctx context.Context, claims Claims) error {
 
 	userID, err := uuid.Parse(claims.Subject)
 	if err != nil {
-		return fmt.Errorf("parse user: %w", err)
+		return fmt.Errorf("parsing user ID %q from claims: %w", claims.Subject, err)
 	}
 
 	usr, err := a.userBus.QueryByID(ctx, userID)
@@ -220,7 +214,7 @@ func (a *Auth) isUserEnabled(ctx context.Context, claims Claims) error {
 	}
 
 	if !usr.Enabled {
-		return fmt.Errorf("user disabled")
+		return ErrUserDisabled
 	}
 
 	return nil

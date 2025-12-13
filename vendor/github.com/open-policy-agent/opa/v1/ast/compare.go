@@ -5,9 +5,10 @@
 package ast
 
 import (
-	"encoding/json"
+	"cmp"
 	"fmt"
 	"math/big"
+	"strings"
 )
 
 // Compare returns an integer indicating whether two AST values are less than,
@@ -36,7 +37,7 @@ import (
 // Sets are considered equal if and only if the symmetric difference of a and b
 // is empty.
 // Other comparisons are consistent but not defined.
-func Compare(a, b interface{}) int {
+func Compare(a, b any) int {
 
 	if t, ok := a.(*Term); ok {
 		if t == nil {
@@ -77,8 +78,7 @@ func Compare(a, b interface{}) int {
 	case Null:
 		return 0
 	case Boolean:
-		b := b.(Boolean)
-		if a.Equal(b) {
+		if a == b.(Boolean) {
 			return 0
 		}
 		if !a {
@@ -86,64 +86,10 @@ func Compare(a, b interface{}) int {
 		}
 		return 1
 	case Number:
-		if ai, err := json.Number(a).Int64(); err == nil {
-			if bi, err := json.Number(b.(Number)).Int64(); err == nil {
-				if ai == bi {
-					return 0
-				}
-				if ai < bi {
-					return -1
-				}
-				return 1
-			}
-		}
-
-		// We use big.Rat for comparing big numbers.
-		// It replaces big.Float due to following reason:
-		// big.Float comes with a default precision of 64, and setting a
-		// larger precision results in more memory being allocated
-		// (regardless of the actual number we are parsing with SetString).
-		//
-		// Note: If we're so close to zero that big.Float says we are zero, do
-		// *not* big.Rat).SetString on the original string it'll potentially
-		// take very long.
-		var bigA, bigB *big.Rat
-		fa, ok := new(big.Float).SetString(string(a))
-		if !ok {
-			panic("illegal value")
-		}
-		if fa.IsInt() {
-			if i, _ := fa.Int64(); i == 0 {
-				bigA = new(big.Rat).SetInt64(0)
-			}
-		}
-		if bigA == nil {
-			bigA, ok = new(big.Rat).SetString(string(a))
-			if !ok {
-				panic("illegal value")
-			}
-		}
-
-		fb, ok := new(big.Float).SetString(string(b.(Number)))
-		if !ok {
-			panic("illegal value")
-		}
-		if fb.IsInt() {
-			if i, _ := fb.Int64(); i == 0 {
-				bigB = new(big.Rat).SetInt64(0)
-			}
-		}
-		if bigB == nil {
-			bigB, ok = new(big.Rat).SetString(string(b.(Number)))
-			if !ok {
-				panic("illegal value")
-			}
-		}
-
-		return bigA.Cmp(bigB)
+		return NumberCompare(a, b.(Number))
 	case String:
 		b := b.(String)
-		if a.Equal(b) {
+		if a == b {
 			return 0
 		}
 		if a < b {
@@ -151,17 +97,9 @@ func Compare(a, b interface{}) int {
 		}
 		return 1
 	case Var:
-		b := b.(Var)
-		if a.Equal(b) {
-			return 0
-		}
-		if a < b {
-			return -1
-		}
-		return 1
+		return VarCompare(a, b.(Var))
 	case Ref:
-		b := b.(Ref)
-		return termSliceCompare(a, b)
+		return termSliceCompare(a, b.(Ref))
 	case *Array:
 		b := b.(*Array)
 		return termSliceCompare(a.elems, b.elems)
@@ -171,17 +109,15 @@ func Compare(a, b interface{}) int {
 		if x, ok := b.(*lazyObj); ok {
 			b = x.force()
 		}
-		b := b.(*object)
-		return a.Compare(b)
+		return a.Compare(b.(*object))
 	case Set:
-		b := b.(Set)
-		return a.Compare(b)
+		return a.Compare(b.(Set))
 	case *ArrayComprehension:
 		b := b.(*ArrayComprehension)
 		if cmp := Compare(a.Term, b.Term); cmp != 0 {
 			return cmp
 		}
-		return Compare(a.Body, b.Body)
+		return a.Body.Compare(b.Body)
 	case *ObjectComprehension:
 		b := b.(*ObjectComprehension)
 		if cmp := Compare(a.Key, b.Key); cmp != 0 {
@@ -190,52 +126,39 @@ func Compare(a, b interface{}) int {
 		if cmp := Compare(a.Value, b.Value); cmp != 0 {
 			return cmp
 		}
-		return Compare(a.Body, b.Body)
+		return a.Body.Compare(b.Body)
 	case *SetComprehension:
 		b := b.(*SetComprehension)
 		if cmp := Compare(a.Term, b.Term); cmp != 0 {
 			return cmp
 		}
-		return Compare(a.Body, b.Body)
+		return a.Body.Compare(b.Body)
 	case Call:
-		b := b.(Call)
-		return termSliceCompare(a, b)
+		return termSliceCompare(a, b.(Call))
 	case *Expr:
-		b := b.(*Expr)
-		return a.Compare(b)
+		return a.Compare(b.(*Expr))
 	case *SomeDecl:
-		b := b.(*SomeDecl)
-		return a.Compare(b)
+		return a.Compare(b.(*SomeDecl))
 	case *Every:
-		b := b.(*Every)
-		return a.Compare(b)
+		return a.Compare(b.(*Every))
 	case *With:
-		b := b.(*With)
-		return a.Compare(b)
+		return a.Compare(b.(*With))
 	case Body:
-		b := b.(Body)
-		return a.Compare(b)
+		return a.Compare(b.(Body))
 	case *Head:
-		b := b.(*Head)
-		return a.Compare(b)
+		return a.Compare(b.(*Head))
 	case *Rule:
-		b := b.(*Rule)
-		return a.Compare(b)
+		return a.Compare(b.(*Rule))
 	case Args:
-		b := b.(Args)
-		return termSliceCompare(a, b)
+		return termSliceCompare(a, b.(Args))
 	case *Import:
-		b := b.(*Import)
-		return a.Compare(b)
+		return a.Compare(b.(*Import))
 	case *Package:
-		b := b.(*Package)
-		return a.Compare(b)
+		return a.Compare(b.(*Package))
 	case *Annotations:
-		b := b.(*Annotations)
-		return a.Compare(b)
+		return a.Compare(b.(*Annotations))
 	case *Module:
-		b := b.(*Module)
-		return a.Compare(b)
+		return a.Compare(b.(*Module))
 	}
 	panic(fmt.Sprintf("illegal value: %T", a))
 }
@@ -243,10 +166,10 @@ func Compare(a, b interface{}) int {
 type termSlice []*Term
 
 func (s termSlice) Less(i, j int) bool { return Compare(s[i].Value, s[j].Value) < 0 }
-func (s termSlice) Swap(i, j int)      { x := s[i]; s[i] = s[j]; s[j] = x }
+func (s termSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s termSlice) Len() int           { return len(s) }
 
-func sortOrder(x interface{}) int {
+func sortOrder(x any) int {
 	switch x.(type) {
 	case Null:
 		return 0
@@ -303,11 +226,8 @@ func sortOrder(x interface{}) int {
 }
 
 func importsCompare(a, b []*Import) int {
-	minLen := len(a)
-	if len(b) < minLen {
-		minLen = len(b)
-	}
-	for i := 0; i < minLen; i++ {
+	minLen := min(len(b), len(a))
+	for i := range minLen {
 		if cmp := a[i].Compare(b[i]); cmp != 0 {
 			return cmp
 		}
@@ -322,11 +242,8 @@ func importsCompare(a, b []*Import) int {
 }
 
 func annotationsCompare(a, b []*Annotations) int {
-	minLen := len(a)
-	if len(b) < minLen {
-		minLen = len(b)
-	}
-	for i := 0; i < minLen; i++ {
+	minLen := min(len(b), len(a))
+	for i := range minLen {
 		if cmp := a[i].Compare(b[i]); cmp != 0 {
 			return cmp
 		}
@@ -341,11 +258,8 @@ func annotationsCompare(a, b []*Annotations) int {
 }
 
 func rulesCompare(a, b []*Rule) int {
-	minLen := len(a)
-	if len(b) < minLen {
-		minLen = len(b)
-	}
-	for i := 0; i < minLen; i++ {
+	minLen := min(len(b), len(a))
+	for i := range minLen {
 		if cmp := a[i].Compare(b[i]); cmp != 0 {
 			return cmp
 		}
@@ -360,11 +274,8 @@ func rulesCompare(a, b []*Rule) int {
 }
 
 func termSliceCompare(a, b []*Term) int {
-	minLen := len(a)
-	if len(b) < minLen {
-		minLen = len(b)
-	}
-	for i := 0; i < minLen; i++ {
+	minLen := min(len(b), len(a))
+	for i := range minLen {
 		if cmp := Compare(a[i], b[i]); cmp != 0 {
 			return cmp
 		}
@@ -378,11 +289,8 @@ func termSliceCompare(a, b []*Term) int {
 }
 
 func withSliceCompare(a, b []*With) int {
-	minLen := len(a)
-	if len(b) < minLen {
-		minLen = len(b)
-	}
-	for i := 0; i < minLen; i++ {
+	minLen := min(len(b), len(a))
+	for i := range minLen {
 		if cmp := Compare(a[i], b[i]); cmp != 0 {
 			return cmp
 		}
@@ -393,4 +301,140 @@ func withSliceCompare(a, b []*With) int {
 		return 1
 	}
 	return 0
+}
+
+func VarCompare(a, b Var) int {
+	if a == b {
+		return 0
+	}
+	if a < b {
+		return -1
+	}
+	return 1
+}
+
+func TermValueCompare(a, b *Term) int {
+	return a.Value.Compare(b.Value)
+}
+
+func TermValueEqual(a, b *Term) bool {
+	return ValueEqual(a.Value, b.Value)
+}
+
+func ValueEqual(a, b Value) bool {
+	// TODO(ae): why doesn't this work the same?
+	//
+	// case interface{ Equal(Value) bool }:
+	// 	   return v.Equal(b)
+	//
+	// When put on top, golangci-lint even flags the other cases as unreachable..
+	// but TestTopdownVirtualCache will have failing test cases when we replace
+	// the other cases with the above one.. 🤔
+	switch v := a.(type) {
+	case Null:
+		return v.Equal(b)
+	case Boolean:
+		return v.Equal(b)
+	case Number:
+		return v.Equal(b)
+	case String:
+		return v.Equal(b)
+	case Var:
+		return v.Equal(b)
+	case Ref:
+		return v.Equal(b)
+	case *Array:
+		return v.Equal(b)
+	}
+
+	return a.Compare(b) == 0
+}
+
+func RefCompare(a, b Ref) int {
+	return termSliceCompare(a, b)
+}
+
+func RefEqual(a, b Ref) bool {
+	return termSliceEqual(a, b)
+}
+
+func NumberCompare(x, y Number) int {
+	xs, ys := string(x), string(y)
+
+	var xIsF, yIsF bool
+
+	// Treat "1" and "1.0", "1.00", etc as "1"
+	if strings.Contains(xs, ".") {
+		if tx := strings.TrimRight(xs, ".0"); tx != xs {
+			// Still a float after trimming?
+			xIsF = strings.Contains(tx, ".")
+			xs = tx
+		}
+	}
+	if strings.Contains(ys, ".") {
+		if ty := strings.TrimRight(ys, ".0"); ty != ys {
+			yIsF = strings.Contains(ty, ".")
+			ys = ty
+		}
+	}
+	if xs == ys {
+		return 0
+	}
+
+	var xi, yi int64
+	var xf, yf float64
+	var xiOK, yiOK, xfOK, yfOK bool
+
+	if xi, xiOK = x.Int64(); xiOK {
+		if yi, yiOK = y.Int64(); yiOK {
+			return cmp.Compare(xi, yi)
+		}
+	}
+
+	if xIsF && yIsF {
+		if xf, xfOK = x.Float64(); xfOK {
+			if yf, yfOK = y.Float64(); yfOK {
+				if xf == yf {
+					return 0
+				}
+				// could still be "equal" depending on precision, so we continue?
+			}
+		}
+	}
+
+	var a *big.Rat
+	fa, ok := new(big.Float).SetString(string(x))
+	if !ok {
+		panic("illegal value")
+	}
+	if fa.IsInt() {
+		if i, _ := fa.Int64(); i == 0 {
+			a = new(big.Rat).SetInt64(0)
+		}
+	}
+	if a == nil {
+		a, ok = new(big.Rat).SetString(string(x))
+		if !ok {
+			panic("illegal value")
+		}
+	}
+
+	var b *big.Rat
+	fb, ok := new(big.Float).SetString(string(y))
+	if !ok {
+		panic("illegal value")
+	}
+	if fb.IsInt() {
+		if i, _ := fb.Int64(); i == 0 {
+			b = new(big.Rat).SetInt64(0)
+		}
+	}
+	if b == nil {
+		b, ok = new(big.Rat).SetString(string(y))
+		if !ok {
+			panic("illegal value")
+		}
+	}
+
+	return a.Cmp(b)
 }

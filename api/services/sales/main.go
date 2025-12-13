@@ -14,12 +14,30 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
-	"github.com/ardanlabs/service/api/services/sales/build/all"
-	"github.com/ardanlabs/service/api/services/sales/build/crud"
-	"github.com/ardanlabs/service/api/services/sales/build/reporting"
+	"github.com/ardanlabs/service/api/services/sales/build"
 	"github.com/ardanlabs/service/app/sdk/authclient"
+	"github.com/ardanlabs/service/app/sdk/authclient/grpc"
+	http2 "github.com/ardanlabs/service/app/sdk/authclient/http"
 	"github.com/ardanlabs/service/app/sdk/debug"
 	"github.com/ardanlabs/service/app/sdk/mux"
+	"github.com/ardanlabs/service/business/domain/auditbus"
+	"github.com/ardanlabs/service/business/domain/auditbus/extensions/auditotel"
+	"github.com/ardanlabs/service/business/domain/auditbus/stores/auditdb"
+	"github.com/ardanlabs/service/business/domain/homebus"
+	"github.com/ardanlabs/service/business/domain/homebus/extensions/homeotel"
+	"github.com/ardanlabs/service/business/domain/homebus/stores/homedb"
+	"github.com/ardanlabs/service/business/domain/productbus"
+	"github.com/ardanlabs/service/business/domain/productbus/extensions/productotel"
+	"github.com/ardanlabs/service/business/domain/productbus/stores/productdb"
+	"github.com/ardanlabs/service/business/domain/userbus"
+	"github.com/ardanlabs/service/business/domain/userbus/extensions/useraudit"
+	"github.com/ardanlabs/service/business/domain/userbus/extensions/userotel"
+	"github.com/ardanlabs/service/business/domain/userbus/stores/usercache"
+	"github.com/ardanlabs/service/business/domain/userbus/stores/userdb"
+	"github.com/ardanlabs/service/business/domain/vproductbus"
+	"github.com/ardanlabs/service/business/domain/vproductbus/extensions/vproductotel"
+	"github.com/ardanlabs/service/business/domain/vproductbus/stores/vproductdb"
+	"github.com/ardanlabs/service/business/sdk/delegate"
 	"github.com/ardanlabs/service/business/sdk/sqldb"
 	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/ardanlabs/service/foundation/otel"
@@ -32,8 +50,7 @@ import (
 //go:embed static
 var static embed.FS
 
-var build = "develop"
-var routes = "all" // go build -ldflags "-X main.routes=crud"
+var tag = "develop"
 
 func main() {
 	var log *logger.Logger
@@ -44,11 +61,7 @@ func main() {
 		},
 	}
 
-	traceIDFn := func(ctx context.Context) string {
-		return otel.GetTraceID(ctx)
-	}
-
-	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "SALES", traceIDFn, events)
+	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "SALES", otel.GetTraceID, events)
 
 	// -------------------------------------------------------------------------
 
@@ -82,7 +95,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 			CORSAllowedOrigins []string      `conf:"default:*"`
 		}
 		Auth struct {
-			Host string `conf:"default:http://auth-service:6000"`
+			Host      string `conf:"default:http://auth-service:6000"`
+			Mechanism string `conf:"default:http"`
+			GRPC      struct {
+				Host string `conf:"default:auth-service:6001"`
+			}
 		}
 		DB struct {
 			User         string `conf:"default:postgres"`
@@ -103,7 +120,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 		}
 	}{
 		Version: conf.Version{
-			Build: build,
+			Build: tag,
 			Desc:  "Sales",
 		},
 	}
@@ -155,18 +172,57 @@ func run(ctx context.Context, log *logger.Logger) error {
 	defer db.Close()
 
 	// -------------------------------------------------------------------------
+	// Create Business Packages
+
+	delegate := delegate.New(log)
+
+	auditOtelExt := auditotel.NewExtension()
+	auditStorage := auditdb.NewStore(log, db)
+	auditBus := auditbus.NewBusiness(log, auditStorage, auditOtelExt)
+
+	userOtelExt := userotel.NewExtension()
+	userAuditExt := useraudit.NewExtension(auditBus)
+	userStorage := usercache.NewStore(log, userdb.NewStore(log, db), time.Minute)
+	userBus := userbus.NewBusiness(log, delegate, userStorage, userOtelExt, userAuditExt)
+
+	productOtelExt := productotel.NewExtension()
+	productStorage := productdb.NewStore(log, db)
+	productBus := productbus.NewBusiness(log, userBus, delegate, productStorage, productOtelExt)
+
+	homeOtelExt := homeotel.NewExtension()
+	homeStorage := homedb.NewStore(log, db)
+	homeBus := homebus.NewBusiness(log, userBus, delegate, homeStorage, homeOtelExt)
+
+	vproductOtelExt := vproductotel.NewExtension()
+	vproductStorage := vproductdb.NewStore(log, db)
+	vproductBus := vproductbus.NewBusiness(vproductStorage, vproductOtelExt)
+
+	// -------------------------------------------------------------------------
 	// Initialize authentication support
 
 	log.Info(ctx, "startup", "status", "initializing authentication support")
 
-	authClient := authclient.New(log, cfg.Auth.Host)
+	var authClient authclient.Authenticator
+	switch cfg.Auth.Mechanism {
+	case "grpc":
+		authClient, err = grpc.New(log, cfg.Auth.GRPC.Host)
+	default:
+		authClient, err = http2.New(log, cfg.Auth.Host)
+	}
+
+	if err != nil {
+		log.Error(ctx, "failed to initialize authentication client", "error", err)
+		return fmt.Errorf("failed to initialize authentication client: %w", err)
+	}
+
+	defer authClient.Close()
 
 	// -------------------------------------------------------------------------
 	// Start Tracing Support
 
 	log.Info(ctx, "startup", "status", "initializing tracing support")
 
-	traceProvider, teardown, err := otel.InitTracing(log, otel.Config{
+	traceProvider, teardown, err := otel.InitTracing(otel.Config{
 		ServiceName: cfg.Tempo.ServiceName,
 		Host:        cfg.Tempo.Host,
 		ExcludedRoutes: map[string]struct{}{
@@ -203,17 +259,24 @@ func run(ctx context.Context, log *logger.Logger) error {
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	cfgMux := mux.Config{
-		Build:  build,
+		Build:  tag,
 		Log:    log,
 		DB:     db,
 		Tracer: tracer,
+		BusConfig: mux.BusConfig{
+			AuditBus:    auditBus,
+			UserBus:     userBus,
+			ProductBus:  productBus,
+			HomeBus:     homeBus,
+			VProductBus: vproductBus,
+		},
 		SalesConfig: mux.SalesConfig{
 			AuthClient: authClient,
 		},
 	}
 
 	webAPI := mux.WebAPI(cfgMux,
-		buildRoutes(),
+		build.Routes(),
 		mux.WithCORS(cfg.Web.CORSAllowedOrigins),
 		mux.WithFileServer(false, static, "static", "/"),
 	)
@@ -256,28 +319,4 @@ func run(ctx context.Context, log *logger.Logger) error {
 	}
 
 	return nil
-}
-
-func buildRoutes() mux.RouteAdder {
-
-	// The idea here is that we can build different versions of the binary
-	// with different sets of exposed web APIs. By default we build a single
-	// instance with all the web APIs.
-	//
-	// Here is the scenario. It would be nice to build two binaries, one for the
-	// transactional APIs (CRUD) and one for the reporting APIs. This would allow
-	// the system to run two instances of the database. One instance tuned for the
-	// transactional database calls and the other tuned for the reporting calls.
-	// Tuning meaning indexing and memory requirements. The two databases can be
-	// kept in sync with replication.
-
-	switch routes {
-	case "crud":
-		return crud.Routes()
-
-	case "reporting":
-		return reporting.Routes()
-	}
-
-	return all.Routes()
 }

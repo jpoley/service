@@ -67,6 +67,9 @@ func startContainer(image string, name string, port string, dockerArgs []string,
 		return c, nil
 	}
 
+	// Just in case there is a container with the same name.
+	exec.Command("docker", "rm", name, "-v").Run()
+
 	arg := []string{"run", "-P", "-d", "--name", name}
 	arg = append(arg, dockerArgs...)
 	arg = append(arg, image)
@@ -76,7 +79,7 @@ func startContainer(image string, name string, port string, dockerArgs []string,
 	cmd := exec.Command("docker", arg...)
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return Container{}, fmt.Errorf("could not start container %s: %w", image, err)
+		return Container{}, fmt.Errorf("could not start container %s: %w: %s", image, err, arg)
 	}
 
 	id := out.String()[:12]
@@ -113,6 +116,7 @@ func extractIPPort(name string, port string) (hostIP string, hostPort string, er
 	// When IPv6 is turned on with Docker.
 	// Got  [{"HostIp":"0.0.0.0","HostPort":"49190"}{"HostIp":"::","HostPort":"49190"}]
 	// Need [{"HostIp":"0.0.0.0","HostPort":"49190"},{"HostIp":"::","HostPort":"49190"}]
+	// '[{{range $i,$v := (index .NetworkSettings.Ports "5432/tcp")}}{{if $i}},{{end}}{{json $v}}{{end}}]'
 
 	tmpl := fmt.Sprintf("[{{range $i,$v := (index .NetworkSettings.Ports \"%s/tcp\")}}{{if $i}},{{end}}{{json $v}}{{end}}]", port)
 

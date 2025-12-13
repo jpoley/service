@@ -7,7 +7,6 @@ import (
 	"github.com/ardanlabs/service/app/sdk/authclient"
 	"github.com/ardanlabs/service/app/sdk/mid"
 	"github.com/ardanlabs/service/business/domain/productbus"
-	"github.com/ardanlabs/service/business/domain/userbus"
 	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/ardanlabs/service/foundation/web"
 )
@@ -15,9 +14,8 @@ import (
 // Config contains all the mandatory systems required by handlers.
 type Config struct {
 	Log        *logger.Logger
-	UserBus    *userbus.Business
-	ProductBus *productbus.Business
-	AuthClient *authclient.Client
+	ProductBus productbus.ExtBusiness
+	AuthClient authclient.Authenticator
 }
 
 // Routes adds specific routes for this group.

@@ -18,9 +18,9 @@ import (
 type Config struct {
 	Log        *logger.Logger
 	DB         *sqlx.DB
-	UserBus    *userbus.Business
-	ProductBus *productbus.Business
-	AuthClient *authclient.Client
+	UserBus    userbus.ExtBusiness
+	ProductBus productbus.ExtBusiness
+	AuthClient authclient.Authenticator
 }
 
 // Routes adds specific routes for this group.

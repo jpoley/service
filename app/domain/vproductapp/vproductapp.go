@@ -14,10 +14,10 @@ import (
 )
 
 type app struct {
-	vproductBus *vproductbus.Business
+	vproductBus vproductbus.ExtBusiness
 }
 
-func newApp(vproductBus *vproductbus.Business) *app {
+func newApp(vproductBus vproductbus.ExtBusiness) *app {
 	return &app{
 		vproductBus: vproductBus,
 	}
@@ -43,12 +43,12 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 
 	prds, err := a.vproductBus.Query(ctx, filter, orderBy, page)
 	if err != nil {
-		return errs.Newf(errs.Internal, "query: %s", err)
+		return errs.Errorf(errs.Internal, "query: %s", err)
 	}
 
 	total, err := a.vproductBus.Count(ctx, filter)
 	if err != nil {
-		return errs.Newf(errs.Internal, "count: %s", err)
+		return errs.Errorf(errs.Internal, "count: %s", err)
 	}
 
 	return query.NewResult(toAppProducts(prds), total, page)

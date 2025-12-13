@@ -30,8 +30,8 @@ offers extensive configuration options. I encourage you to read through this
 README and experiment with the examples in order to understand its full
 capabilities.
 
-Here is a screenshot showing the P95 latency improvements we observed after
-adding this package in front of a distributed key-value store:
+This screenshot shows the P95 latency improvements we observed after adding
+this package in front of a distributed key-value store:
 
 &nbsp;
 <img width="1554" alt="Screenshot 2024-05-10 at 10 15 18" src="https://github.com/viccon/sturdyc/assets/12787673/adad1d4c-e966-4db1-969a-eda4fd75653a">
@@ -407,11 +407,17 @@ request, and another from the second or third.
 // [4,11]
 // [14,2]
 // [6,15]
+
+func pickRandomValue(batches [][]string) string {
+	batch := batches[rand.IntN(len(batches))]
+	return batch[rand.IntN(len(batch))]
+}
+
 var wg sync.WaitGroup
 for i := 0; i < 5; i++ {
 	wg.Add(1)
 	go func() {
-		ids := []string{batches[rand.IntN(2)][rand.IntN(4)], batches[rand.IntN(2)][rand.IntN(4)]}
+		ids := []string{pickRandomValue(batches), pickRandomValue(batches)}
 		res, _ := cacheClient.GetOrFetchBatch(context.Background(), ids, keyPrefixFn, fetchFn)
 		log.Printf("got batch: %v\n", res)
 		wg.Done()

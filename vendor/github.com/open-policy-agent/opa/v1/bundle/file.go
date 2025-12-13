@@ -352,12 +352,10 @@ func (t *tarballLoader) NextFile() (*Descriptor, error) {
 
 		for {
 			header, err := t.tr.Next()
-
-			if err == io.EOF {
-				break
-			}
-
 			if err != nil {
+				if err == io.EOF {
+					break
+				}
 				return nil, err
 			}
 
@@ -365,7 +363,6 @@ func (t *tarballLoader) NextFile() (*Descriptor, error) {
 			if header.Typeflag == tar.TypeReg {
 
 				if t.filter != nil {
-
 					if t.filter(filepath.ToSlash(header.Name), header.FileInfo(), getdepth(header.Name, false)) {
 						continue
 					}
@@ -438,15 +435,11 @@ func (it *iterator) Next() (*storage.Update, error) {
 		for _, item := range it.raw {
 			f := file{name: item.Path}
 
-			fpath := strings.TrimLeft(normalizePath(filepath.Dir(f.name)), "/.")
-			if strings.HasSuffix(f.name, RegoExt) {
-				fpath = strings.Trim(normalizePath(f.name), "/")
+			p, err := getFileStoragePath(f.name)
+			if err != nil {
+				return nil, err
 			}
 
-			p, ok := storage.ParsePathEscaped("/" + fpath)
-			if !ok {
-				return nil, fmt.Errorf("storage path invalid: %v", f.name)
-			}
 			f.path = p
 
 			f.raw = item.Value
@@ -466,7 +459,7 @@ func (it *iterator) Next() (*storage.Update, error) {
 	f := it.files[it.idx]
 	it.idx++
 
-	isPolicy := false
+	var isPolicy bool
 	if strings.HasSuffix(f.name, RegoExt) {
 		isPolicy = true
 	}
@@ -505,4 +498,17 @@ func getdepth(path string, isDir bool) int {
 
 	basePath := strings.Trim(filepath.Dir(filepath.ToSlash(path)), "/")
 	return len(strings.Split(basePath, "/"))
+}
+
+func getFileStoragePath(path string) (storage.Path, error) {
+	fpath := strings.TrimLeft(filepath.ToSlash(filepath.Dir(path)), "/.")
+	if strings.HasSuffix(path, RegoExt) {
+		fpath = strings.Trim(filepath.ToSlash(path), "/")
+	}
+
+	p, ok := storage.ParsePathEscaped("/" + fpath)
+	if !ok {
+		return nil, fmt.Errorf("storage path invalid: %v", path)
+	}
+	return p, nil
 }

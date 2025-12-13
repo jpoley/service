@@ -7,7 +7,9 @@ import (
 	"net/mail"
 
 	"github.com/ardanlabs/service/business/types/name"
+	"github.com/ardanlabs/service/business/types/password"
 	"github.com/ardanlabs/service/business/types/role"
+	"github.com/google/uuid"
 )
 
 // TestNewUsers is a helper method for testing.
@@ -15,7 +17,7 @@ func TestNewUsers(n int, rle role.Role) []NewUser {
 	newUsrs := make([]NewUser, n)
 
 	idx := rand.Intn(10000)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		idx++
 
 		nu := NewUser{
@@ -23,7 +25,7 @@ func TestNewUsers(n int, rle role.Role) []NewUser {
 			Email:      mail.Address{Address: fmt.Sprintf("Email%d@gmail.com", idx)},
 			Roles:      []role.Role{rle},
 			Department: name.MustParseNull(fmt.Sprintf("Department%d", idx)),
-			Password:   fmt.Sprintf("Password%d", idx),
+			Password:   password.MustParse(fmt.Sprintf("Password%d", idx)),
 		}
 
 		newUsrs[i] = nu
@@ -33,12 +35,12 @@ func TestNewUsers(n int, rle role.Role) []NewUser {
 }
 
 // TestSeedUsers is a helper method for testing.
-func TestSeedUsers(ctx context.Context, n int, role role.Role, api *Business) ([]User, error) {
+func TestSeedUsers(ctx context.Context, n int, role role.Role, api ExtBusiness) ([]User, error) {
 	newUsrs := TestNewUsers(n, role)
 
 	usrs := make([]User, len(newUsrs))
 	for i, nu := range newUsrs {
-		usr, err := api.Create(ctx, nu)
+		usr, err := api.Create(ctx, uuid.UUID{}, nu)
 		if err != nil {
 			return nil, fmt.Errorf("seeding user: idx: %d : %w", i, err)
 		}

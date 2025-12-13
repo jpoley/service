@@ -3,13 +3,13 @@ package homebus
 import (
 	"time"
 
-	"github.com/ardanlabs/service/business/types/hometype"
+	"github.com/ardanlabs/service/business/types/home"
 	"github.com/google/uuid"
 )
 
 // Address represents an individual address.
 type Address struct {
-	Address1 string // We should create types for these fields.
+	Address1 string // We need to create strong types for these fields.
 	Address2 string
 	ZipCode  string
 	City     string
@@ -21,7 +21,7 @@ type Address struct {
 type Home struct {
 	ID          uuid.UUID
 	UserID      uuid.UUID
-	Type        hometype.HomeType
+	Type        home.Home
 	Address     Address
 	DateCreated time.Time
 	DateUpdated time.Time
@@ -30,7 +30,7 @@ type Home struct {
 // NewHome is what we require from clients when adding a Home.
 type NewHome struct {
 	UserID  uuid.UUID
-	Type    hometype.HomeType
+	Type    home.Home
 	Address Address
 }
 
@@ -51,6 +51,6 @@ type UpdateAddress struct {
 // we do not want to use pointers to basic types but we make exception around
 // marshalling/unmarshalling.
 type UpdateHome struct {
-	Type    *hometype.HomeType
+	Type    *home.Home
 	Address *UpdateAddress
 }

@@ -14,12 +14,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// isError tests if the Encoder has an error inside of it.
-func isError(e web.Encoder) error {
-	err, isError := e.(error)
-	if isError {
+func checkIsError(e web.Encoder) error {
+	err, hasError := e.(error)
+	if hasError {
 		return err
 	}
+
 	return nil
 }
 
@@ -47,6 +47,18 @@ func GetClaims(ctx context.Context) auth.Claims {
 		return auth.Claims{}
 	}
 	return v
+}
+
+// GetSubjectID returns the subject id from the claims.
+func GetSubjectID(ctx context.Context) uuid.UUID {
+	v := GetClaims(ctx)
+
+	subjectID, err := uuid.Parse(v.Subject)
+	if err != nil {
+		return uuid.UUID{}
+	}
+
+	return subjectID
 }
 
 func setUserID(ctx context.Context, userID uuid.UUID) context.Context {

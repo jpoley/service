@@ -12,7 +12,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -22,6 +21,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/ast"
 	astJSON "github.com/open-policy-agent/opa/v1/ast/json"
 	"github.com/open-policy-agent/opa/v1/bundle"
+	"github.com/open-policy-agent/opa/v1/loader/extension"
 	"github.com/open-policy-agent/opa/v1/loader/filter"
 	"github.com/open-policy-agent/opa/v1/metrics"
 	"github.com/open-policy-agent/opa/v1/storage"
@@ -31,7 +31,7 @@ import (
 
 // Result represents the result of successfully loading zero or more files.
 type Result struct {
-	Documents map[string]interface{}
+	Documents map[string]any
 	Modules   map[string]*RegoFile
 	path      []string
 }
@@ -99,8 +99,11 @@ type FileLoader interface {
 	WithFilter(Filter) FileLoader
 	WithBundleVerificationConfig(*bundle.VerificationConfig) FileLoader
 	WithSkipBundleVerification(bool) FileLoader
+	WithBundleLazyLoadingMode(bool) FileLoader
 	WithProcessAnnotation(bool) FileLoader
 	WithCapabilities(*ast.Capabilities) FileLoader
+	// Deprecated: Use SetOptions in the json package instead, where a longer description
+	// of why this is deprecated also can be found.
 	WithJSONOptions(*astJSON.Options) FileLoader
 	WithRegoVersion(ast.RegoVersion) FileLoader
 	WithFollowSymlinks(bool) FileLoader
@@ -115,15 +118,16 @@ func NewFileLoader() FileLoader {
 }
 
 type fileLoader struct {
-	metrics        metrics.Metrics
-	filter         Filter
-	bvc            *bundle.VerificationConfig
-	skipVerify     bool
-	files          map[string]bundle.FileInfo
-	opts           ast.ParserOptions
-	fsys           fs.FS
-	reader         io.Reader
-	followSymlinks bool
+	metrics           metrics.Metrics
+	filter            Filter
+	bvc               *bundle.VerificationConfig
+	skipVerify        bool
+	bundleLazyLoading bool
+	files             map[string]bundle.FileInfo
+	opts              ast.ParserOptions
+	fsys              fs.FS
+	reader            io.Reader
+	followSymlinks    bool
 }
 
 // WithFS provides an fs.FS to use for loading files. You can pass nil to
@@ -166,6 +170,12 @@ func (fl *fileLoader) WithSkipBundleVerification(skipVerify bool) FileLoader {
 	return fl
 }
 
+// WithBundleLazyLoadingMode enables or disables bundle lazy loading mode
+func (fl *fileLoader) WithBundleLazyLoadingMode(bundleLazyLoading bool) FileLoader {
+	fl.bundleLazyLoading = bundleLazyLoading
+	return fl
+}
+
 // WithProcessAnnotation enables or disables processing of schema annotations on rules
 func (fl *fileLoader) WithProcessAnnotation(processAnnotation bool) FileLoader {
 	fl.opts.ProcessAnnotation = processAnnotation
@@ -178,9 +188,11 @@ func (fl *fileLoader) WithCapabilities(caps *ast.Capabilities) FileLoader {
 	return fl
 }
 
-// WithJSONOptions sets the JSONOptions for use when parsing files
-func (fl *fileLoader) WithJSONOptions(opts *astJSON.Options) FileLoader {
-	fl.opts.JSONOptions = opts
+// WithJSONOptions sets the JSON options on the parser (now a no-op).
+//
+// Deprecated: Use SetOptions in the json package instead, where a longer description
+// of why this is deprecated also can be found.
+func (fl *fileLoader) WithJSONOptions(*astJSON.Options) FileLoader {
 	return fl
 }
 
@@ -220,7 +232,7 @@ func (fl fileLoader) Filtered(paths []string, filter Filter) (*Result, error) {
 			return err
 		}
 
-		result, err := loadKnownTypes(path, bs, fl.metrics, fl.opts)
+		result, err := loadKnownTypes(path, bs, fl.metrics, fl.opts, fl.bundleLazyLoading)
 		if err != nil {
 			if !isUnrecognizedFile(err) {
 				return err
@@ -268,11 +280,13 @@ func (fl fileLoader) AsBundle(path string) (*bundle.Bundle, error) {
 		WithMetrics(fl.metrics).
 		WithBundleVerificationConfig(fl.bvc).
 		WithSkipBundleVerification(fl.skipVerify).
+		WithLazyLoadingMode(fl.bundleLazyLoading).
 		WithProcessAnnotations(fl.opts.ProcessAnnotation).
 		WithCapabilities(fl.opts.Capabilities).
-		WithJSONOptions(fl.opts.JSONOptions).
 		WithFollowSymlinks(fl.followSymlinks).
-		WithRegoVersion(fl.opts.RegoVersion)
+		WithRegoVersion(fl.opts.RegoVersion).
+		WithLazyLoadingMode(fl.bundleLazyLoading).
+		WithBundleName(path)
 
 	// For bundle directories add the full path in front of module file names
 	// to simplify debugging.
@@ -460,19 +474,19 @@ func getSchemaSetByPathKey(path string) ast.Ref {
 	key := make(ast.Ref, 1+len(parts))
 	key[0] = ast.SchemaRootDocument
 	for i := range parts {
-		key[i+1] = ast.StringTerm(parts[i])
+		key[i+1] = ast.InternedTerm(parts[i])
 	}
 
 	return key
 }
 
-func loadOneSchema(path string) (interface{}, error) {
+func loadOneSchema(path string) (any, error) {
 	bs, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var schema interface{}
+	var schema any
 	if err := util.Unmarshal(bs, &schema); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -481,6 +495,7 @@ func loadOneSchema(path string) (interface{}, error) {
 }
 
 // All returns a Result object loaded (recursively) from the specified paths.
+//
 // Deprecated: Use FileLoader.Filtered() instead.
 func All(paths []string) (*Result, error) {
 	return NewFileLoader().Filtered(paths, nil)
@@ -489,6 +504,7 @@ func All(paths []string) (*Result, error) {
 // Filtered returns a Result object loaded (recursively) from the specified
 // paths while applying the given filters. If any filter returns true, the
 // file/directory is excluded.
+//
 // Deprecated: Use FileLoader.Filtered() instead.
 func Filtered(paths []string, filter Filter) (*Result, error) {
 	return NewFileLoader().Filtered(paths, filter)
@@ -497,6 +513,7 @@ func Filtered(paths []string, filter Filter) (*Result, error) {
 // AsBundle loads a path as a bundle. If it is a single file
 // it will be treated as a normal tarball bundle. If a directory
 // is supplied it will be loaded as an unzipped bundle tree.
+//
 // Deprecated: Use FileLoader.AsBundle() instead.
 func AsBundle(path string) (*bundle.Bundle, error) {
 	return NewFileLoader().AsBundle(path)
@@ -564,12 +581,7 @@ func Dirs(paths []string) []string {
 		unique[dir] = struct{}{}
 	}
 
-	u := make([]string, 0, len(unique))
-	for k := range unique {
-		u = append(u, k)
-	}
-	sort.Strings(u)
-	return u
+	return util.KeysSorted(unique)
 }
 
 // SplitPrefix returns a tuple specifying the document prefix and the file
@@ -587,7 +599,7 @@ func SplitPrefix(path string) ([]string, string) {
 	return nil, path
 }
 
-func (l *Result) merge(path string, result interface{}) error {
+func (l *Result) merge(path string, result any) error {
 	switch result := result.(type) {
 	case bundle.Bundle:
 		for _, module := range result.Modules {
@@ -606,7 +618,7 @@ func (l *Result) merge(path string, result interface{}) error {
 	}
 }
 
-func (l *Result) mergeDocument(path string, doc interface{}) error {
+func (l *Result) mergeDocument(path string, doc any) error {
 	obj, ok := makeDir(l.path, doc)
 	if !ok {
 		return unsupportedDocumentType(path)
@@ -622,17 +634,16 @@ func (l *Result) mergeDocument(path string, doc interface{}) error {
 }
 
 func (l *Result) withParent(p string) *Result {
-	path := append(l.path, p)
 	return &Result{
 		Documents: l.Documents,
 		Modules:   l.Modules,
-		path:      path,
+		path:      append(l.path, p),
 	}
 }
 
 func newResult() *Result {
 	return &Result{
-		Documents: map[string]interface{}{},
+		Documents: map[string]any{},
 		Modules:   map[string]*RegoFile{},
 	}
 }
@@ -722,8 +733,22 @@ func allRec(fsys fs.FS, path string, filter Filter, errors *Errors, loaded *Resu
 	}
 }
 
-func loadKnownTypes(path string, bs []byte, m metrics.Metrics, opts ast.ParserOptions) (interface{}, error) {
-	switch filepath.Ext(path) {
+func loadKnownTypes(path string, bs []byte, m metrics.Metrics, opts ast.ParserOptions, bundleLazyLoadingMode bool) (any, error) {
+	ext := filepath.Ext(path)
+	if handler := extension.FindExtension(ext); handler != nil {
+		m.Timer(metrics.RegoDataParse).Start()
+
+		var value any
+		err := handler(bs, &value)
+
+		m.Timer(metrics.RegoDataParse).Stop()
+		if err != nil {
+			return nil, fmt.Errorf("bundle %s: %w", path, err)
+		}
+
+		return value, nil
+	}
+	switch ext {
 	case ".json":
 		return loadJSON(path, bs, m)
 	case ".rego":
@@ -732,7 +757,7 @@ func loadKnownTypes(path string, bs []byte, m metrics.Metrics, opts ast.ParserOp
 		return loadYAML(path, bs, m)
 	default:
 		if strings.HasSuffix(path, ".tar.gz") {
-			r, err := loadBundleFile(path, bs, m, opts)
+			r, err := loadBundleFile(path, bs, m, opts, bundleLazyLoadingMode)
 			if err != nil {
 				err = fmt.Errorf("bundle %s: %w", path, err)
 			}
@@ -742,7 +767,7 @@ func loadKnownTypes(path string, bs []byte, m metrics.Metrics, opts ast.ParserOp
 	return nil, unrecognizedFile(path)
 }
 
-func loadFileForAnyType(path string, bs []byte, m metrics.Metrics, opts ast.ParserOptions) (interface{}, error) {
+func loadFileForAnyType(path string, bs []byte, m metrics.Metrics, opts ast.ParserOptions) (any, error) {
 	module, err := loadRego(path, bs, m, opts)
 	if err == nil {
 		return module, nil
@@ -758,15 +783,15 @@ func loadFileForAnyType(path string, bs []byte, m metrics.Metrics, opts ast.Pars
 	return nil, unrecognizedFile(path)
 }
 
-func loadBundleFile(path string, bs []byte, m metrics.Metrics, opts ast.ParserOptions) (bundle.Bundle, error) {
+func loadBundleFile(path string, bs []byte, m metrics.Metrics, opts ast.ParserOptions, bundleLazyLoadingMode bool) (bundle.Bundle, error) {
 	tl := bundle.NewTarballLoaderWithBaseURL(bytes.NewBuffer(bs), path)
 	br := bundle.NewCustomReader(tl).
 		WithRegoVersion(opts.RegoVersion).
 		WithCapabilities(opts.Capabilities).
-		WithJSONOptions(opts.JSONOptions).
 		WithProcessAnnotations(opts.ProcessAnnotation).
 		WithMetrics(m).
 		WithSkipBundleVerification(true).
+		WithLazyLoadingMode(bundleLazyLoadingMode).
 		IncludeManifestInData(true)
 	return br.Read()
 }
@@ -788,9 +813,9 @@ func loadRego(path string, bs []byte, m metrics.Metrics, opts ast.ParserOptions)
 	return result, nil
 }
 
-func loadJSON(path string, bs []byte, m metrics.Metrics) (interface{}, error) {
+func loadJSON(path string, bs []byte, m metrics.Metrics) (any, error) {
 	m.Timer(metrics.RegoDataParse).Start()
-	var x interface{}
+	var x any
 	err := util.UnmarshalJSON(bs, &x)
 	m.Timer(metrics.RegoDataParse).Stop()
 
@@ -800,7 +825,7 @@ func loadJSON(path string, bs []byte, m metrics.Metrics) (interface{}, error) {
 	return x, nil
 }
 
-func loadYAML(path string, bs []byte, m metrics.Metrics) (interface{}, error) {
+func loadYAML(path string, bs []byte, m metrics.Metrics) (any, error) {
 	m.Timer(metrics.RegoDataParse).Start()
 	bs, err := yaml.YAMLToJSON(bs)
 	m.Timer(metrics.RegoDataParse).Stop()
@@ -810,15 +835,15 @@ func loadYAML(path string, bs []byte, m metrics.Metrics) (interface{}, error) {
 	return loadJSON(path, bs, m)
 }
 
-func makeDir(path []string, x interface{}) (map[string]interface{}, bool) {
+func makeDir(path []string, x any) (map[string]any, bool) {
 	if len(path) == 0 {
-		obj, ok := x.(map[string]interface{})
+		obj, ok := x.(map[string]any)
 		if !ok {
 			return nil, false
 		}
 		return obj, true
 	}
-	return makeDir(path[:len(path)-1], map[string]interface{}{path[len(path)-1]: x})
+	return makeDir(path[:len(path)-1], map[string]any{path[len(path)-1]: x})
 }
 
 // isUNC reports whether path is a UNC path.

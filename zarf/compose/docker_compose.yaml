@@ -1,17 +1,17 @@
 services:
   database:
-    image: postgres:17.2
+    image: postgres:18.1-alpine3.22
     container_name: database
     ports:
       - "5432:5432"
     environment:
       - POSTGRES_PASSWORD=postgres
     volumes:
-      - ./database-data:/var/lib/postgresql/data
+      - ./database-data:/var/lib/postgresql/18/docker
       - ./pg_hba.conf:/etc/pg_hba.conf
-    command: [ '-c', 'hba_file=/etc/pg_hba.conf' ]
+    command: ["-c", "hba_file=/etc/pg_hba.conf"]
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -h localhost -U postgres" ]
+      test: ["CMD-SHELL", "pg_isready -h localhost -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,7 +26,7 @@ services:
     pull_policy: never
     container_name: init-migrate-seed
     restart: unless-stopped
-    entrypoint: ['./admin', 'migrate-seed']
+    entrypoint: ["./admin", "migrate-seed"]
     environment:
       - SALES_DB_USER=postgres
       - SALES_DB_PASSWORD=postgres
@@ -48,9 +48,11 @@ services:
     restart: unless-stopped
     ports:
       - "6000:6000"
+      - "6001:6001"
       - "6010:6010"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6000/v1/liveness || exit 1"]
+      test:
+        ["CMD-SHELL", "wget -qO- http://localhost:6000/v1/liveness || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 2
@@ -66,9 +68,6 @@ services:
       - KUBERNETES_NAME=sales-system
       - KUBERNETES_POD_IP=10.5.0.5
       - KUBERNETES_NODE_NAME=auth
-    expose:
-      - "6000:6000"
-      - "6010:6010"
     networks:
       sales-system-network:
         ipv4_address: 10.5.0.5
@@ -97,7 +96,8 @@ services:
       - KUBERNETES_POD_IP
       - KUBERNETES_NODE_NAME
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/v1/liveness || exit 1"]
+      test:
+        ["CMD-SHELL", "wget -qO- http://localhost:3000/v1/liveness || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 2

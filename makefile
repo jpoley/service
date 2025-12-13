@@ -7,17 +7,17 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 # ==============================================================================
 # Go Installation
 #
-#	You need to have Go version 1.22 to run this code.
+#	You need to have Go version 1.25 to run this code.
 #
 #	https://go.dev/dl/
 #
 #	If you are not allowed to update your Go frontend, you can install
-#	and use a 1.22 frontend.
+#	and use a 1.25 frontend.
 #
-#	$ go install golang.org/dl/go1.22@latest
-#	$ go1.22 download
+#	$ go install golang.org/dl/go1.25@latest
+#	$ go1.25 download
 #
-#	This means you need to use `go1.22` instead of `go` for any command
+#	This means you need to use `go1.25` instead of `go` for any command
 #	using the Go frontend tooling from the makefile.
 
 # ==============================================================================
@@ -81,7 +81,7 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 # CLASS NOTES
 #
 # Kind
-# 	For full Kind v0.26 release notes: https://github.com/kubernetes-sigs/kind/releases/tag/v0.26.0
+# 	For full Kind v0.30 release notes: https://github.com/kubernetes-sigs/kind/releases/tag/v0.30.0
 #
 # RSA Keys
 # 	To generate a private/public key PEM file.
@@ -109,15 +109,15 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 # ==============================================================================
 # Define dependencies
 
-GOLANG          := golang:1.23
-ALPINE          := alpine:3.21
-KIND            := kindest/node:v1.32.0
-POSTGRES        := postgres:17.2
-GRAFANA         := grafana/grafana:11.4.0
-PROMETHEUS      := prom/prometheus:v3.0.0
-TEMPO           := grafana/tempo:2.6.0
-LOKI            := grafana/loki:3.3.0
-PROMTAIL        := grafana/promtail:3.3.0
+GOLANG          := golang:1.25
+ALPINE          := alpine:3.23
+KIND            := kindest/node:v1.34.0
+POSTGRES        := postgres:18.1
+GRAFANA         := grafana/grafana:12.3.0
+PROMETHEUS      := prom/prometheus:v3.8.0
+TEMPO           := grafana/tempo:2.9.0
+LOKI            := grafana/loki:3.5.0
+PROMTAIL        := grafana/promtail:3.6.0
 
 KIND_CLUSTER    := ardan-starter-cluster
 NAMESPACE       := sales-system
@@ -130,6 +130,16 @@ METRICS_IMAGE   := $(BASE_IMAGE_NAME)/metrics:$(VERSION)
 AUTH_IMAGE      := $(BASE_IMAGE_NAME)/$(AUTH_APP):$(VERSION)
 
 # VERSION       := "0.0.1-$(shell git rev-parse --short HEAD)"
+
+# ==============================================================================
+# Detect operating system and set the appropriate open command
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	OPEN_CMD := open
+else
+	OPEN_CMD := xdg-open
+endif
 
 # ==============================================================================
 # Install dependencies
@@ -148,17 +158,18 @@ dev-brew:
 	brew list kustomize || brew install kustomize
 	brew list pgcli || brew install pgcli
 	brew list watch || brew install watch
+	brew list grpcurl || brew install grpcurl
 
 dev-docker:
-	docker pull $(GOLANG) & \
-	docker pull $(ALPINE) & \
-	docker pull $(KIND) & \
-	docker pull $(POSTGRES) & \
-	docker pull $(GRAFANA) & \
-	docker pull $(PROMETHEUS) & \
-	docker pull $(TEMPO) & \
-	docker pull $(LOKI) & \
-	docker pull $(PROMTAIL) & \
+	docker pull docker.io/$(GOLANG) & \
+	docker pull docker.io/$(ALPINE) & \
+	docker pull docker.io/$(KIND) & \
+	docker pull docker.io/$(POSTGRES) & \
+	docker pull docker.io/$(GRAFANA) & \
+	docker pull docker.io/$(PROMETHEUS) & \
+	docker pull docker.io/$(TEMPO) & \
+	docker pull docker.io/$(LOKI) & \
+	docker pull docker.io/$(PROMTAIL) & \
 	wait;
 
 # ==============================================================================
@@ -170,7 +181,7 @@ sales:
 	docker build \
 		-f zarf/docker/dockerfile.sales \
 		-t $(SALES_IMAGE) \
-		--build-arg BUILD_REF=$(VERSION) \
+		--build-arg BUILD_TAG=$(VERSION) \
 		--build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
 		.
 
@@ -178,7 +189,7 @@ metrics:
 	docker build \
 		-f zarf/docker/dockerfile.metrics \
 		-t $(METRICS_IMAGE) \
-		--build-arg BUILD_REF=$(VERSION) \
+		--build-arg BUILD_TAG=$(VERSION) \
 		--build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
 		.
 
@@ -186,12 +197,16 @@ auth:
 	docker build \
 		-f zarf/docker/dockerfile.auth \
 		-t $(AUTH_IMAGE) \
-		--build-arg BUILD_REF=$(VERSION) \
+		--build-arg BUILD_TAG=$(VERSION) \
 		--build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
 		.
 
 # ==============================================================================
 # Running from within k8s/kind
+# Docker Desktop 28.3.2 changed how it stores image layers, causing KIND's kind
+# load docker-image command to fail with "content digest not found" errors. The
+# workaround uses docker save | docker exec to bypass this incompatibility for
+# the critical images allowing this to work without a network.
 
 dev-up:
 	kind create cluster \
@@ -201,12 +216,12 @@ dev-up:
 
 	kubectl wait --timeout=120s --namespace=local-path-storage --for=condition=Available deployment/local-path-provisioner
 
-	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER) & \
-	kind load docker-image $(GRAFANA) --name $(KIND_CLUSTER) & \
-	kind load docker-image $(PROMETHEUS) --name $(KIND_CLUSTER) & \
-	kind load docker-image $(TEMPO) --name $(KIND_CLUSTER) & \
-	kind load docker-image $(LOKI) --name $(KIND_CLUSTER) & \
-	kind load docker-image $(PROMTAIL) --name $(KIND_CLUSTER) & \
+	docker save $(POSTGRES) | docker exec -i $(KIND_CLUSTER)-control-plane ctr --namespace=k8s.io images import - & \
+	docker save $(GRAFANA) | docker exec -i $(KIND_CLUSTER)-control-plane ctr --namespace=k8s.io images import - & \
+	docker save $(PROMETHEUS) | docker exec -i $(KIND_CLUSTER)-control-plane ctr --namespace=k8s.io images import - & \
+	docker save $(TEMPO) | docker exec -i $(KIND_CLUSTER)-control-plane ctr --namespace=k8s.io images import - & \
+	docker save $(LOKI) | docker exec -i $(KIND_CLUSTER)-control-plane ctr --namespace=k8s.io images import - & \
+	docker save $(PROMTAIL) | docker exec -i $(KIND_CLUSTER)-control-plane ctr --namespace=k8s.io images import - & \
 	wait;
 
 dev-down:
@@ -359,10 +374,10 @@ pgcli:
 	pgcli postgresql://postgres:postgres@localhost
 
 liveness:
-	curl -il http://localhost:3000/v1/liveness
+	curl -i http://localhost:3000/v1/liveness
 
 readiness:
-	curl -il http://localhost:3000/v1/readiness
+	curl -i http://localhost:3000/v1/readiness
 
 token-gen:
 	export SALES_DB_HOST=localhost; go run api/tooling/admin/main.go gentoken 5cf37266-3473-4006-984f-9325122678b7 54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
@@ -377,10 +392,10 @@ metrics-view:
 	expvarmon -ports="localhost:4020" -endpoint="/metrics" -vars="build,requests,goroutines,errors,panics,mem:memstats.HeapAlloc,mem:memstats.HeapSys,mem:memstats.Sys"
 
 grafana:
-	open http://localhost:3100/
+	$(OPEN_CMD) http://localhost:3100/
 
 statsviz:
-	open http://localhost:3010/debug/statsviz
+	$(OPEN_CMD) http://localhost:3010/debug/statsviz
 
 # ==============================================================================
 # Running tests within the local computer
@@ -410,17 +425,30 @@ test-race: test-r lint vuln-check
 # Hitting endpoints
 
 token:
-	curl -il \
+	curl -s \
 	--user "admin@example.com:gophers" http://localhost:6000/v1/auth/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
 
 # export TOKEN="COPY TOKEN STRING FROM LAST CALL"
 
+###
+# Use this command to export the TOKEN variable directly into your shell
+# To do so, you have to run: `eval $(make export-token)`
+###
+export-token:
+	@$(MAKE) token \
+	| sed -n 's/.*"token":"\([^"]*\)".*/export TOKEN="\1"/p'
+
+token-grpc:
+	grpcurl -plaintext -d '{"kid":"54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"}' \
+      -H "Authorization: Basic YWRtaW5AZXhhbXBsZS5jb206Z29waGVycw==" \
+      localhost:6001 auth.Auth/Token
+
 users:
-	curl -il \
+	curl -i \
 	-H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
 
 users-timeout:
-	curl -il \
+	curl -i \
 	--max-time 1 \
 	-H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
 
@@ -429,9 +457,18 @@ load:
 	-H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
 
 otel-test:
-	curl -il \
+	curl -i \
 	-H "Traceparent: 00-918dd5ecf264712262b68cf2ef8b5239-896d90f23f69f006-01" \
 	--user "admin@example.com:gophers" http://localhost:6000/v1/auth/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
+
+# ==============================================================================
+# Protobuf support
+
+proto-gen:
+	protoc --go_out=app/domain/grpcauthapp --go_opt=paths=source_relative \
+		--go-grpc_out=app/domain/grpcauthapp --go-grpc_opt=paths=source_relative \
+		--proto_path=zarf/proto \
+		zarf/proto/auth.proto
 
 # ==============================================================================
 # Modules support
@@ -462,6 +499,9 @@ list:
 # ==============================================================================
 # Class Stuff
 
+run-auth:
+	go run api/services/auth/main.go | go run api/tooling/logfmt/main.go
+
 run:
 	go run api/services/sales/main.go | go run api/tooling/logfmt/main.go
 
@@ -469,10 +509,10 @@ run-help:
 	go run api/services/sales/main.go --help | go run api/tooling/logfmt/main.go
 
 curl:
-	curl -il http://localhost:3000/v1/hack
+	curl -i http://localhost:3000/v1/hack
 
 curl-auth:
-	curl -il -H "Authorization: Bearer ${TOKEN}" http://localhost:3000/v1/hackauth
+	curl -i -H "Authorization: Bearer ${TOKEN}" http://localhost:3000/v1/hackauth
 
 load-hack:
 	hey -m GET -c 100 -n 100000 "http://localhost:3000/v1/hack"
@@ -481,13 +521,13 @@ admin:
 	go run api/tooling/admin/main.go
 
 ready:
-	curl -il http://localhost:3000/v1/readiness
+	curl -i http://localhost:3000/v1/readiness
 
 live:
-	curl -il http://localhost:3000/v1/liveness
+	curl -i http://localhost:3000/v1/liveness
 
 curl-create:
-	curl -il -X POST \
+	curl -i -X POST \
 	-H "Authorization: Bearer ${TOKEN}" \
 	-H 'Content-Type: application/json' \
 	-d '{"name":"bill","email":"b@gmail.com","roles":["ADMIN"],"department":"ITO","password":"123","passwordConfirm":"123"}' \
@@ -504,18 +544,27 @@ talk-up:
 
 	kubectl wait --timeout=120s --namespace=local-path-storage --for=condition=Available deployment/local-path-provisioner
 
-	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER)
+	docker save $(POSTGRES) | docker exec -i $(KIND_CLUSTER)-control-plane ctr --namespace=k8s.io images import -
+
+talk-load:
+	kind load docker-image $(SALES_IMAGE) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(METRICS_IMAGE) --name $(KIND_CLUSTER) & \
+	kind load docker-image $(AUTH_IMAGE) --name $(KIND_CLUSTER) & \
+	wait;
 
 talk-apply:
 	kustomize build zarf/k8s/dev/database | kubectl apply -f -
 	kubectl rollout status --namespace=$(NAMESPACE) --watch --timeout=120s sts/database
 
+	kustomize build zarf/k8s/dev/auth | kubectl apply -f -
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(AUTH_APP) --timeout=120s --for=condition=Ready
+
 	kustomize build zarf/k8s/dev/sales | kubectl apply -f -
 	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(SALES_APP) --timeout=120s --for=condition=Ready
 
-talk-build: all dev-load talk-apply
+talk-run: build talk-up talk-load talk-apply
 
-talk-load:
+talk-run-load:
 	hey -m GET -c 10 -n 1000 -H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
 
 talk-logs:
@@ -529,6 +578,9 @@ talk-logs-mem:
 
 talk-describe:
 	kubectl describe pod --namespace=$(NAMESPACE) -l app=$(SALES_APP)
+
+talk-describe-min:
+	kubectl describe pod --namespace=$(NAMESPACE) -l app=$(SALES_APP) | grep -i -A 21 '  sales:' | sed -n '1p;3p;11,16p;18,22p'
 
 talk-metrics:
 	expvarmon -ports="localhost:4000" -vars="build,requests,goroutines,errors,panics,mem:memstats.HeapAlloc,mem:memstats.HeapSys,mem:memstats.Sys"
@@ -544,6 +596,9 @@ write-token-to-env:
 
 admin-gui-install:
 	pnpm -C ${ADMIN_FRONTEND_PREFIX} install
+
+admin-gui-update:
+	pnpm -C ${ADMIN_FRONTEND_PREFIX} update
 
 admin-gui-dev: admin-gui-install
 	pnpm -C ${ADMIN_FRONTEND_PREFIX} run dev

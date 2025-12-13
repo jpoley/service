@@ -8,20 +8,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"slices"
 	"strings"
-	"time"
 
 	"github.com/open-policy-agent/opa/v1/ast/internal/tokens"
 	astJSON "github.com/open-policy-agent/opa/v1/ast/json"
 	"github.com/open-policy-agent/opa/v1/util"
 )
-
-// Initialize seed for term hashing. This is intentionally placed before the
-// root document sets are constructed to ensure they use the same hash seed as
-// subsequent lookups. If the hash seeds are out of sync, lookups will fail.
-var hashSeed = rand.New(rand.NewSource(time.Now().UnixNano()))
-var hashSeed0 = (uint64(hashSeed.Uint32()) << 32) | uint64(hashSeed.Uint32())
 
 // DefaultRootDocument is the default root document.
 //
@@ -93,7 +86,11 @@ var ReservedVars = NewVarSet(
 )
 
 // Wildcard represents the wildcard variable as defined in the language.
-var Wildcard = &Term{Value: Var("_")}
+var (
+	WildcardString       = "_"
+	WildcardValue  Value = Var(WildcardString)
+	Wildcard             = &Term{Value: WildcardValue}
+)
 
 // WildcardPrefix is the special character that all wildcard variables are
 // prefixed with when the statement they are contained in is parsed.
@@ -150,12 +147,7 @@ func IsKeyword(s string) bool {
 }
 
 func IsInKeywords(s string, keywords []string) bool {
-	for _, x := range keywords {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(keywords, s)
 }
 
 // IsKeywordInRegoVersion returns true if s is a language keyword.
@@ -213,8 +205,6 @@ type (
 		// TODO: these fields have inconsistent JSON keys with other structs in this package.
 		Text     []byte
 		Location *Location
-
-		jsonOptions astJSON.Options
 	}
 
 	// Package represents the namespace of the documents produced
@@ -222,8 +212,6 @@ type (
 	Package struct {
 		Path     Ref       `json:"path"`
 		Location *Location `json:"location,omitempty"`
-
-		jsonOptions astJSON.Options
 	}
 
 	// Import represents a dependency on a document outside of the policy
@@ -232,8 +220,6 @@ type (
 		Path     *Term     `json:"path"`
 		Alias    Var       `json:"alias,omitempty"`
 		Location *Location `json:"location,omitempty"`
-
-		jsonOptions astJSON.Options
 	}
 
 	// Rule represents a rule as defined in the language. Rules define the
@@ -253,7 +239,6 @@ type (
 		Module *Module `json:"-"`
 
 		generatedBody bool
-		jsonOptions   astJSON.Options
 	}
 
 	// Head represents the head of a rule.
@@ -268,7 +253,6 @@ type (
 
 		keywords       []tokens.Token
 		generatedValue bool
-		jsonOptions    astJSON.Options
 	}
 
 	// Args represents zero or more arguments to a rule.
@@ -280,14 +264,13 @@ type (
 
 	// Expr represents a single expression contained inside the body of a rule.
 	Expr struct {
-		With      []*With     `json:"with,omitempty"`
-		Terms     interface{} `json:"terms"`
-		Index     int         `json:"index"`
-		Generated bool        `json:"generated,omitempty"`
-		Negated   bool        `json:"negated,omitempty"`
-		Location  *Location   `json:"location,omitempty"`
+		With      []*With   `json:"with,omitempty"`
+		Terms     any       `json:"terms"`
+		Index     int       `json:"index"`
+		Generated bool      `json:"generated,omitempty"`
+		Negated   bool      `json:"negated,omitempty"`
+		Location  *Location `json:"location,omitempty"`
 
-		jsonOptions   astJSON.Options
 		generatedFrom *Expr
 		generates     []*Expr
 	}
@@ -296,8 +279,6 @@ type (
 	SomeDecl struct {
 		Symbols  []*Term   `json:"symbols"`
 		Location *Location `json:"location,omitempty"`
-
-		jsonOptions astJSON.Options
 	}
 
 	Every struct {
@@ -306,8 +287,6 @@ type (
 		Domain   *Term     `json:"domain"`
 		Body     Body      `json:"body"`
 		Location *Location `json:"location,omitempty"`
-
-		jsonOptions astJSON.Options
 	}
 
 	// With represents a modifier on an expression.
@@ -315,8 +294,6 @@ type (
 		Target   *Term     `json:"target"`
 		Value    *Term     `json:"value"`
 		Location *Location `json:"location,omitempty"`
-
-		jsonOptions astJSON.Options
 	}
 )
 
@@ -402,8 +379,10 @@ func (mod *Module) String() string {
 	appendAnnotationStrings := func(buf []string, node Node) []string {
 		if as, ok := byNode[node]; ok {
 			for i := range as {
-				buf = append(buf, "# METADATA")
-				buf = append(buf, "# "+as[i].String())
+				buf = append(buf,
+					"# METADATA",
+					"# "+as[i].String(),
+				)
 			}
 		}
 		return buf
@@ -514,19 +493,10 @@ func (c *Comment) Equal(other *Comment) bool {
 	return c.Location.Equal(other.Location) && bytes.Equal(c.Text, other.Text)
 }
 
-func (c *Comment) setJSONOptions(opts astJSON.Options) {
-	// Note: this is not used for location since Comments use default JSON marshaling
-	// behavior with struct field names in JSON.
-	c.jsonOptions = opts
-	if c.Location != nil {
-		c.Location.JSONOptions = opts
-	}
-}
-
 // Compare returns an integer indicating whether pkg is less than, equal to,
 // or greater than other.
 func (pkg *Package) Compare(other *Package) int {
-	return Compare(pkg.Path, other.Path)
+	return termSliceCompare(pkg.Path, other.Path)
 }
 
 // Copy returns a deep copy of pkg.
@@ -567,19 +537,12 @@ func (pkg *Package) String() string {
 	return fmt.Sprintf("package %v", path)
 }
 
-func (pkg *Package) setJSONOptions(opts astJSON.Options) {
-	pkg.jsonOptions = opts
-	if pkg.Location != nil {
-		pkg.Location.JSONOptions = opts
-	}
-}
-
 func (pkg *Package) MarshalJSON() ([]byte, error) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"path": pkg.Path,
 	}
 
-	if pkg.jsonOptions.MarshalOptions.IncludeLocation.Package {
+	if astJSON.GetOptions().MarshalOptions.IncludeLocation.Package {
 		if pkg.Location != nil {
 			data["location"] = pkg.Location
 		}
@@ -625,7 +588,8 @@ func (imp *Import) Compare(other *Import) int {
 	if cmp := Compare(imp.Path, other.Path); cmp != 0 {
 		return cmp
 	}
-	return Compare(imp.Alias, other.Alias)
+
+	return VarCompare(imp.Alias, other.Alias)
 }
 
 // Copy returns a deep copy of imp.
@@ -675,20 +639,13 @@ func (imp *Import) Name() Var {
 func (imp *Import) String() string {
 	buf := []string{"import", imp.Path.String()}
 	if len(imp.Alias) > 0 {
-		buf = append(buf, "as "+imp.Alias.String())
+		buf = append(buf, "as", imp.Alias.String())
 	}
 	return strings.Join(buf, " ")
 }
 
-func (imp *Import) setJSONOptions(opts astJSON.Options) {
-	imp.jsonOptions = opts
-	if imp.Location != nil {
-		imp.Location.JSONOptions = opts
-	}
-}
-
 func (imp *Import) MarshalJSON() ([]byte, error) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"path": imp.Path,
 	}
 
@@ -696,7 +653,7 @@ func (imp *Import) MarshalJSON() ([]byte, error) {
 		data["alias"] = imp.Alias
 	}
 
-	if imp.jsonOptions.MarshalOptions.IncludeLocation.Import {
+	if astJSON.GetOptions().MarshalOptions.IncludeLocation.Import {
 		if imp.Location != nil {
 			data["location"] = imp.Location
 		}
@@ -719,8 +676,11 @@ func (rule *Rule) Compare(other *Rule) int {
 	if cmp := rule.Head.Compare(other.Head); cmp != 0 {
 		return cmp
 	}
-	if cmp := util.Compare(rule.Default, other.Default); cmp != 0 {
-		return cmp
+	if rule.Default != other.Default {
+		if !rule.Default {
+			return -1
+		}
+		return 1
 	}
 	if cmp := rule.Body.Compare(other.Body); cmp != 0 {
 		return cmp
@@ -739,9 +699,11 @@ func (rule *Rule) Copy() *Rule {
 	cpy.Head = rule.Head.Copy()
 	cpy.Body = rule.Body.Copy()
 
-	cpy.Annotations = make([]*Annotations, len(rule.Annotations))
-	for i, a := range rule.Annotations {
-		cpy.Annotations[i] = a.Copy(&cpy)
+	if len(cpy.Annotations) > 0 {
+		cpy.Annotations = make([]*Annotations, len(rule.Annotations))
+		for i, a := range rule.Annotations {
+			cpy.Annotations[i] = a.Copy(&cpy)
+		}
 	}
 
 	if cpy.Else != nil {
@@ -770,6 +732,7 @@ func (rule *Rule) SetLoc(loc *Location) {
 
 // Path returns a ref referring to the document produced by this rule. If rule
 // is not contained in a module, this function panics.
+//
 // Deprecated: Poor handling of ref rules. Use `(*Rule).Ref()` instead.
 func (rule *Rule) Path() Ref {
 	if rule.Module == nil {
@@ -818,9 +781,7 @@ func (rule *Rule) stringWithOpts(opts toStringOpts) string {
 		case RegoV1, RegoV0CompatV1:
 			buf = append(buf, "if")
 		}
-		buf = append(buf, "{")
-		buf = append(buf, rule.Body.String())
-		buf = append(buf, "}")
+		buf = append(buf, "{", rule.Body.String(), "}")
 	}
 	if rule.Else != nil {
 		buf = append(buf, rule.Else.elseString(opts))
@@ -832,15 +793,8 @@ func (rule *Rule) isFunction() bool {
 	return len(rule.Head.Args) > 0
 }
 
-func (rule *Rule) setJSONOptions(opts astJSON.Options) {
-	rule.jsonOptions = opts
-	if rule.Location != nil {
-		rule.Location.JSONOptions = opts
-	}
-}
-
 func (rule *Rule) MarshalJSON() ([]byte, error) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"head": rule.Head,
 		"body": rule.Body,
 	}
@@ -853,7 +807,7 @@ func (rule *Rule) MarshalJSON() ([]byte, error) {
 		data["else"] = rule.Else
 	}
 
-	if rule.jsonOptions.MarshalOptions.IncludeLocation.Rule {
+	if astJSON.GetOptions().MarshalOptions.IncludeLocation.Rule {
 		if rule.Location != nil {
 			data["location"] = rule.Location
 		}
@@ -873,8 +827,7 @@ func (rule *Rule) elseString(opts toStringOpts) string {
 
 	value := rule.Head.Value
 	if value != nil {
-		buf = append(buf, "=")
-		buf = append(buf, value.String())
+		buf = append(buf, "=", value.String())
 	}
 
 	switch opts.RegoVersion() {
@@ -882,9 +835,7 @@ func (rule *Rule) elseString(opts toStringOpts) string {
 		buf = append(buf, "if")
 	}
 
-	buf = append(buf, "{")
-	buf = append(buf, rule.Body.String())
-	buf = append(buf, "}")
+	buf = append(buf, "{", rule.Body.String(), "}")
 
 	if rule.Else != nil {
 		buf = append(buf, rule.Else.elseString(opts))
@@ -914,14 +865,11 @@ func NewHead(name Var, args ...*Term) *Head {
 	return head
 }
 
-// VarHead creates a head object, initializes its Name, Location, and Options,
-// and returns the new head.
-func VarHead(name Var, location *Location, jsonOpts *astJSON.Options) *Head {
+// VarHead creates a head object, initializes its Name and Location and returns the new head.
+// NOTE: The JSON options argument is no longer used, and kept only for backwards compatibility.
+func VarHead(name Var, location *Location, _ *astJSON.Options) *Head {
 	h := NewHead(name)
 	h.Reference[0].Location = location
-	if jsonOpts != nil {
-		h.Reference[0].setJSONOptions(*jsonOpts)
-	}
 	return h
 }
 
@@ -940,7 +888,7 @@ func RefHead(ref Ref, args ...*Term) *Head {
 }
 
 // DocKind represents the collection of document types that can be produced by rules.
-type DocKind int
+type DocKind byte
 
 const (
 	// CompleteDoc represents a document that is completely defined by the rule.
@@ -960,11 +908,13 @@ func (head *Head) DocKind() DocKind {
 			return PartialObjectDoc
 		}
 		return PartialSetDoc
+	} else if head.HasDynamicRef() {
+		return PartialObjectDoc
 	}
 	return CompleteDoc
 }
 
-type RuleKind int
+type RuleKind byte
 
 const (
 	SingleValue = iota
@@ -1021,7 +971,7 @@ func (head *Head) Compare(other *Head) int {
 	if cmp := Compare(head.Reference, other.Reference); cmp != 0 {
 		return cmp
 	}
-	if cmp := Compare(head.Name, other.Name); cmp != 0 {
+	if cmp := VarCompare(head.Name, other.Name); cmp != 0 {
 		return cmp
 	}
 	if cmp := Compare(head.Key, other.Key); cmp != 0 {
@@ -1084,26 +1034,10 @@ func (head *Head) stringWithOpts(opts toStringOpts) string {
 	return buf.String()
 }
 
-func (head *Head) setJSONOptions(opts astJSON.Options) {
-	head.jsonOptions = opts
-	if head.Location != nil {
-		head.Location.JSONOptions = opts
-	}
-}
-
 func (head *Head) MarshalJSON() ([]byte, error) {
 	var loc *Location
-	includeLoc := head.jsonOptions.MarshalOptions.IncludeLocation
-	if includeLoc.Head {
-		if head.Location != nil {
-			loc = head.Location
-		}
-
-		for _, term := range head.Reference {
-			if term.Location != nil {
-				term.jsonOptions.MarshalOptions.IncludeLocation.Term = includeLoc.Term
-			}
-		}
+	if astJSON.GetOptions().MarshalOptions.IncludeLocation.Head && head.Location != nil {
+		loc = head.Location
 	}
 
 	// NOTE(sr): we do this to override the rendering of `head.Reference`.
@@ -1123,10 +1057,10 @@ func (head *Head) MarshalJSON() ([]byte, error) {
 
 // Vars returns a set of vars found in the head.
 func (head *Head) Vars() VarSet {
-	vis := &VarVisitor{vars: VarSet{}}
+	vis := NewVarVisitor()
 	// TODO: improve test coverage for this.
 	if head.Args != nil {
-		vis.Walk(head.Args)
+		vis.WalkArgs(head.Args)
 	}
 	if head.Key != nil {
 		vis.Walk(head.Key)
@@ -1135,7 +1069,7 @@ func (head *Head) Vars() VarSet {
 		vis.Walk(head.Value)
 	}
 	if len(head.Reference) > 0 {
-		vis.Walk(head.Reference[1:])
+		vis.WalkRef(head.Reference[1:])
 	}
 	return vis.vars
 }
@@ -1155,8 +1089,7 @@ func (head *Head) SetLoc(loc *Location) {
 
 func (head *Head) HasDynamicRef() bool {
 	pos := head.Reference.Dynamic()
-	// Ref is dynamic if it has one non-constant term that isn't the first or last term or if it's a partial set rule.
-	return pos > 0 && (pos < len(head.Reference)-1 || head.RuleKind() == MultiValue)
+	return pos > 0 && (pos < len(head.Reference))
 }
 
 // Copy returns a deep copy of a.
@@ -1193,8 +1126,8 @@ func (a Args) SetLoc(loc *Location) {
 
 // Vars returns a set of vars that appear in a.
 func (a Args) Vars() VarSet {
-	vis := &VarVisitor{vars: VarSet{}}
-	vis.Walk(a)
+	vis := NewVarVisitor()
+	vis.WalkArgs(a)
 	return vis.vars
 }
 
@@ -1237,11 +1170,8 @@ func (body Body) Set(expr *Expr, pos int) {
 //
 // If body is a subset of other, it is considered less than (and vice versa).
 func (body Body) Compare(other Body) int {
-	minLen := len(body)
-	if len(other) < minLen {
-		minLen = len(other)
-	}
-	for i := 0; i < minLen; i++ {
+	minLen := min(len(other), len(body))
+	for i := range minLen {
 		if cmp := body[i].Compare(other[i]); cmp != 0 {
 			return cmp
 		}
@@ -1266,12 +1196,7 @@ func (body Body) Copy() Body {
 
 // Contains returns true if this body contains the given expression.
 func (body Body) Contains(x *Expr) bool {
-	for _, e := range body {
-		if e.Equal(x) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(body, x.Equal)
 }
 
 // Equal returns true if this Body is equal to the other Body.
@@ -1325,12 +1250,12 @@ func (body Body) String() string {
 // control which vars are included.
 func (body Body) Vars(params VarVisitorParams) VarSet {
 	vis := NewVarVisitor().WithParams(params)
-	vis.Walk(body)
+	vis.WalkBody(body)
 	return vis.Vars()
 }
 
 // NewExpr returns a new Expr object.
-func NewExpr(terms interface{}) *Expr {
+func NewExpr(terms any) *Expr {
 	switch terms.(type) {
 	case *SomeDecl, *Every, *Term, []*Term: // ok
 	default:
@@ -1470,11 +1395,7 @@ func (expr *Expr) Copy() *Expr {
 	case *SomeDecl:
 		cpy.Terms = ts.Copy()
 	case []*Term:
-		cpyTs := make([]*Term, len(ts))
-		for i := range ts {
-			cpyTs[i] = ts[i].Copy()
-		}
-		cpy.Terms = cpyTs
+		cpy.Terms = termSliceCopy(ts)
 	case *Term:
 		cpy.Terms = ts.Copy()
 	case *Every:
@@ -1655,15 +1576,8 @@ func (expr *Expr) String() string {
 	return strings.Join(buf, " ")
 }
 
-func (expr *Expr) setJSONOptions(opts astJSON.Options) {
-	expr.jsonOptions = opts
-	if expr.Location != nil {
-		expr.Location.JSONOptions = opts
-	}
-}
-
 func (expr *Expr) MarshalJSON() ([]byte, error) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"terms": expr.Terms,
 		"index": expr.Index,
 	}
@@ -1680,7 +1594,7 @@ func (expr *Expr) MarshalJSON() ([]byte, error) {
 		data["negated"] = true
 	}
 
-	if expr.jsonOptions.MarshalOptions.IncludeLocation.Expr {
+	if astJSON.GetOptions().MarshalOptions.IncludeLocation.Expr {
 		if expr.Location != nil {
 			data["location"] = expr.Location
 		}
@@ -1691,7 +1605,7 @@ func (expr *Expr) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON parses the byte array and stores the result in expr.
 func (expr *Expr) UnmarshalJSON(bs []byte) error {
-	v := map[string]interface{}{}
+	v := map[string]any{}
 	if err := util.UnmarshalJSON(bs, &v); err != nil {
 		return err
 	}
@@ -1794,19 +1708,12 @@ func (d *SomeDecl) Hash() int {
 	return termSliceHash(d.Symbols)
 }
 
-func (d *SomeDecl) setJSONOptions(opts astJSON.Options) {
-	d.jsonOptions = opts
-	if d.Location != nil {
-		d.Location.JSONOptions = opts
-	}
-}
-
 func (d *SomeDecl) MarshalJSON() ([]byte, error) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"symbols": d.Symbols,
 	}
 
-	if d.jsonOptions.MarshalOptions.IncludeLocation.SomeDecl {
+	if astJSON.GetOptions().MarshalOptions.IncludeLocation.SomeDecl {
 		if d.Location != nil {
 			data["location"] = d.Location
 		}
@@ -1863,7 +1770,7 @@ func (q *Every) Compare(other *Every) int {
 // KeyValueVars returns the key and val arguments of an `every`
 // expression, if they are non-nil and not wildcards.
 func (q *Every) KeyValueVars() VarSet {
-	vis := &VarVisitor{vars: VarSet{}}
+	vis := NewVarVisitor()
 	if q.Key != nil {
 		vis.Walk(q.Key)
 	}
@@ -1871,22 +1778,15 @@ func (q *Every) KeyValueVars() VarSet {
 	return vis.vars
 }
 
-func (q *Every) setJSONOptions(opts astJSON.Options) {
-	q.jsonOptions = opts
-	if q.Location != nil {
-		q.Location.JSONOptions = opts
-	}
-}
-
 func (q *Every) MarshalJSON() ([]byte, error) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"key":    q.Key,
 		"value":  q.Value,
 		"domain": q.Domain,
 		"body":   q.Body,
 	}
 
-	if q.jsonOptions.MarshalOptions.IncludeLocation.Every {
+	if astJSON.GetOptions().MarshalOptions.IncludeLocation.Every {
 		if q.Location != nil {
 			data["location"] = q.Location
 		}
@@ -1953,20 +1853,13 @@ func (w *With) SetLoc(loc *Location) {
 	w.Location = loc
 }
 
-func (w *With) setJSONOptions(opts astJSON.Options) {
-	w.jsonOptions = opts
-	if w.Location != nil {
-		w.Location.JSONOptions = opts
-	}
-}
-
 func (w *With) MarshalJSON() ([]byte, error) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"target": w.Target,
 		"value":  w.Value,
 	}
 
-	if w.jsonOptions.MarshalOptions.IncludeLocation.With {
+	if astJSON.GetOptions().MarshalOptions.IncludeLocation.With {
 		if w.Location != nil {
 			data["location"] = w.Location
 		}
@@ -1976,7 +1869,7 @@ func (w *With) MarshalJSON() ([]byte, error) {
 }
 
 // Copy returns a deep copy of the AST node x. If x is not an AST node, x is returned unmodified.
-func Copy(x interface{}) interface{} {
+func Copy(x any) any {
 	switch x := x.(type) {
 	case *Module:
 		return x.Copy()

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -21,6 +20,8 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
+const defaultTraceID = "00000000000000000000000000000000"
+
 // Config defines the information needed to init tracing.
 type Config struct {
 	ServiceName    string
@@ -30,7 +31,7 @@ type Config struct {
 }
 
 // InitTracing configures open telemetry to be used with the service.
-func InitTracing(log *logger.Logger, cfg Config) (trace.TracerProvider, func(ctx context.Context), error) {
+func InitTracing(cfg Config) (trace.TracerProvider, func(ctx context.Context), error) {
 
 	// WARNING: The current settings are using defaults which may not be
 	// compatible with your project. Please review the documentation for
@@ -52,14 +53,11 @@ func InitTracing(log *logger.Logger, cfg Config) (trace.TracerProvider, func(ctx
 
 	switch cfg.Host {
 	case "":
-		log.Info(context.Background(), "OTEL", "tracer", "NOOP")
 		traceProvider = noop.NewTracerProvider()
 
 	default:
-		log.Info(context.Background(), "OTEL", "tracer", cfg.Host)
-
 		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithSampler(newEndpointExcluder(cfg.ExcludedRoutes, cfg.Probability)),
+			sdktrace.WithSampler(sdktrace.ParentBased(newEndpointExcluder(cfg.ExcludedRoutes, cfg.Probability))),
 			sdktrace.WithBatcher(exporter,
 				sdktrace.WithMaxExportBatchSize(sdktrace.DefaultMaxExportBatchSize),
 				sdktrace.WithBatchTimeout(sdktrace.DefaultScheduleDelay*time.Millisecond),
@@ -100,7 +98,7 @@ func InjectTracing(ctx context.Context, tracer trace.Tracer) context.Context {
 	ctx = setTracer(ctx, tracer)
 
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
-	if traceID == "00000000000000000000000000000000" {
+	if traceID == defaultTraceID { // Use defined constant
 		traceID = uuid.NewString()
 	}
 	ctx = setTraceID(ctx, traceID)
@@ -110,12 +108,13 @@ func InjectTracing(ctx context.Context, tracer trace.Tracer) context.Context {
 
 // AddSpan adds an otel span to the existing trace.
 func AddSpan(ctx context.Context, spanName string, keyValues ...attribute.KeyValue) (context.Context, trace.Span) {
-	v, ok := ctx.Value(tracerKey).(trace.Tracer)
-	if !ok || v == nil {
+	tracer, ok := ctx.Value(tracerKey).(trace.Tracer)
+	if !ok || tracer == nil {
 		return ctx, trace.SpanFromContext(ctx)
 	}
 
-	ctx, span := v.Start(ctx, spanName)
+	ctx, span := tracer.Start(ctx, spanName)
+
 	span.SetAttributes(keyValues...)
 
 	return ctx, span

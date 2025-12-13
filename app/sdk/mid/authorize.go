@@ -20,7 +20,7 @@ import (
 var ErrInvalidID = errors.New("ID is not in its proper form")
 
 // Authorize validates authorization via the auth service.
-func Authorize(client *authclient.Client, rule string) web.MidFunc {
+func Authorize(client authclient.Authenticator, rule string) web.MidFunc {
 	m := func(next web.HandlerFunc) web.HandlerFunc {
 		h := func(ctx context.Context, r *http.Request) web.Encoder {
 			userID, err := GetUserID(ctx)
@@ -54,7 +54,7 @@ func Authorize(client *authclient.Client, rule string) web.MidFunc {
 // user from the DB if a user id is specified in the call. Depending on the rule
 // specified, the userid from the claims may be compared with the specified
 // user id.
-func AuthorizeUser(client *authclient.Client, userBus *userbus.Business, rule string) web.MidFunc {
+func AuthorizeUser(client authclient.Authenticator, userBus userbus.ExtBusiness, rule string) web.MidFunc {
 	m := func(next web.HandlerFunc) web.HandlerFunc {
 		h := func(ctx context.Context, r *http.Request) web.Encoder {
 			id := web.Param(r, "user_id")
@@ -74,7 +74,7 @@ func AuthorizeUser(client *authclient.Client, userBus *userbus.Business, rule st
 					case errors.Is(err, userbus.ErrNotFound):
 						return errs.New(errs.Unauthenticated, err)
 					default:
-						return errs.Newf(errs.Unauthenticated, "querybyid: userID[%s]: %s", userID, err)
+						return errs.Errorf(errs.Unauthenticated, "querybyid: userID[%s]: %s", userID, err)
 					}
 				}
 
@@ -107,7 +107,7 @@ func AuthorizeUser(client *authclient.Client, userBus *userbus.Business, rule st
 // product from the DB if a product id is specified in the call. Depending on
 // the rule specified, the userid from the claims may be compared with the
 // specified user id from the product.
-func AuthorizeProduct(client *authclient.Client, productBus *productbus.Business) web.MidFunc {
+func AuthorizeProduct(client authclient.Authenticator, productBus productbus.ExtBusiness) web.MidFunc {
 	m := func(next web.HandlerFunc) web.HandlerFunc {
 		h := func(ctx context.Context, r *http.Request) web.Encoder {
 			id := web.Param(r, "product_id")
@@ -127,7 +127,7 @@ func AuthorizeProduct(client *authclient.Client, productBus *productbus.Business
 					case errors.Is(err, productbus.ErrNotFound):
 						return errs.New(errs.Unauthenticated, err)
 					default:
-						return errs.Newf(errs.Internal, "querybyid: productID[%s]: %s", productID, err)
+						return errs.Errorf(errs.Unauthenticated, "querybyid: productID[%s]: %s", productID, err)
 					}
 				}
 
@@ -161,7 +161,7 @@ func AuthorizeProduct(client *authclient.Client, productBus *productbus.Business
 // home from the DB if a home id is specified in the call. Depending on
 // the rule specified, the userid from the claims may be compared with the
 // specified user id from the home.
-func AuthorizeHome(client *authclient.Client, homeBus *homebus.Business) web.MidFunc {
+func AuthorizeHome(client authclient.Authenticator, homeBus homebus.ExtBusiness) web.MidFunc {
 	m := func(next web.HandlerFunc) web.HandlerFunc {
 		h := func(ctx context.Context, r *http.Request) web.Encoder {
 			id := web.Param(r, "home_id")
@@ -181,7 +181,7 @@ func AuthorizeHome(client *authclient.Client, homeBus *homebus.Business) web.Mid
 					case errors.Is(err, homebus.ErrNotFound):
 						return errs.New(errs.Unauthenticated, err)
 					default:
-						return errs.Newf(errs.Unauthenticated, "querybyid: homeID[%s]: %s", homeID, err)
+						return errs.Errorf(errs.Unauthenticated, "querybyid: homeID[%s]: %s", homeID, err)
 					}
 				}
 

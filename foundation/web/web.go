@@ -66,26 +66,7 @@ func NewApp(log Logger, tracer trace.Tracer, mw ...MidFunc) *App {
 // tracing. The opentelemetry mux then calls the application mux to handle
 // application traffic. This was set up in the NewApp function.
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	a.otmux.ServeHTTP(w, r)
-}
-
-// EnableCORS enables CORS preflight requests to work in the middleware. It
-// prevents the MethodNotAllowedHandler from being called. This must be enabled
-// for the CORS middleware to work.
-func (a *App) EnableCORS(origins []string) {
-	a.origins = origins
-
-	handler := func(ctx context.Context, r *http.Request) Encoder {
-		return nil
-	}
-	handler = wrapMiddleware([]MidFunc{a.corsHandler}, handler)
-
-	a.HandlerFuncNoMid(http.MethodOptions, "", "/", handler)
-}
-
-func (a *App) corsHandler(webHandler HandlerFunc) HandlerFunc {
-	h := func(ctx context.Context, r *http.Request) Encoder {
-		w := GetWriter(ctx)
+	if a.origins != nil {
 
 		// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin
 		// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Origin
@@ -108,10 +89,25 @@ func (a *App) corsHandler(webHandler HandlerFunc) HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
-		return webHandler(ctx, r)
+		// Handle pre-flight by sending a 200 OK response.
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 	}
 
-	return h
+	// In the following example, max-age is set to 2 years, and is suffixed with
+	// preload, which is necessary for inclusion in all major web browsers' HSTS
+	// preload lists, like Chromium, Edge, and Firefox.
+	w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+
+	a.otmux.ServeHTTP(w, r)
+}
+
+// EnableCORS enables CORS preflight requests to work. It prevents the
+// MethodNotAllowedHandler from being called.
+func (a *App) EnableCORS(origins []string) {
+	a.origins = origins
 }
 
 // HandlerFuncNoMid sets a handler function for a given HTTP method and path
@@ -143,10 +139,6 @@ func (a *App) HandlerFuncNoMid(method string, group string, path string, handler
 func (a *App) HandlerFunc(method string, group string, path string, handlerFunc HandlerFunc, mw ...MidFunc) {
 	handlerFunc = wrapMiddleware(mw, handlerFunc)
 	handlerFunc = wrapMiddleware(a.mw, handlerFunc)
-
-	if a.origins != nil {
-		handlerFunc = wrapMiddleware([]MidFunc{a.corsHandler}, handlerFunc)
-	}
 
 	h := func(w http.ResponseWriter, r *http.Request) {
 		ctx := setTracer(r.Context(), a.tracer)
@@ -183,10 +175,6 @@ func (a *App) RawHandlerFunc(method string, group string, path string, rawHandle
 	handlerFunc = wrapMiddleware(mw, handlerFunc)
 	handlerFunc = wrapMiddleware(a.mw, handlerFunc)
 
-	if a.origins != nil {
-		handlerFunc = wrapMiddleware([]MidFunc{a.corsHandler}, handlerFunc)
-	}
-
 	h := func(w http.ResponseWriter, r *http.Request) {
 		ctx := setTracer(r.Context(), a.tracer)
 		ctx = setWriter(ctx, w)
@@ -221,10 +209,12 @@ func (a *App) FileServerReact(static embed.FS, dir string, path string) error {
 		if !fileMatcher.MatchString(r.URL.Path) {
 			p, err := static.ReadFile(fmt.Sprintf("%s/index.html", dir))
 			if err != nil {
-				a.log(context.Background(), "FileServerReact", "ERROR", err)
+				a.log(r.Context(), "FileServerReact", "index.html not found", "ERROR", err)
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 				return
 			}
 
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write(p)
 			return
 		}

@@ -3,13 +3,17 @@
 package mux
 
 import (
-	"context"
 	"embed"
 	"net/http"
 
 	"github.com/ardanlabs/service/app/sdk/auth"
 	"github.com/ardanlabs/service/app/sdk/authclient"
 	"github.com/ardanlabs/service/app/sdk/mid"
+	"github.com/ardanlabs/service/business/domain/auditbus"
+	"github.com/ardanlabs/service/business/domain/homebus"
+	"github.com/ardanlabs/service/business/domain/productbus"
+	"github.com/ardanlabs/service/business/domain/userbus"
+	"github.com/ardanlabs/service/business/domain/vproductbus"
 	"github.com/ardanlabs/service/foundation/logger"
 	"github.com/ardanlabs/service/foundation/web"
 	"github.com/jmoiron/sqlx"
@@ -51,7 +55,7 @@ func WithFileServer(react bool, static embed.FS, dir string, path string) func(o
 
 // SalesConfig contains sales service specific config.
 type SalesConfig struct {
-	AuthClient *authclient.Client
+	AuthClient authclient.Authenticator
 }
 
 // AuthConfig contains auth service specific config.
@@ -59,14 +63,23 @@ type AuthConfig struct {
 	Auth *auth.Auth
 }
 
+type BusConfig struct {
+	AuditBus    auditbus.ExtBusiness
+	UserBus     userbus.ExtBusiness
+	ProductBus  productbus.ExtBusiness
+	HomeBus     homebus.ExtBusiness
+	VProductBus vproductbus.ExtBusiness
+}
+
 // Config contains all the mandatory systems required by handlers.
 type Config struct {
-	Build  string
-	Log    *logger.Logger
-	DB     *sqlx.DB
-	Tracer trace.Tracer
-	SalesConfig
-	AuthConfig
+	Build       string
+	Log         *logger.Logger
+	DB          *sqlx.DB
+	Tracer      trace.Tracer
+	BusConfig   BusConfig
+	SalesConfig SalesConfig
+	AuthConfig  AuthConfig
 }
 
 // RouteAdder defines behavior that sets the routes to bind for an instance
@@ -77,12 +90,8 @@ type RouteAdder interface {
 
 // WebAPI constructs a http.Handler with all application routes bound.
 func WebAPI(cfg Config, routeAdder RouteAdder, options ...func(opts *Options)) http.Handler {
-	logger := func(ctx context.Context, msg string, args ...any) {
-		cfg.Log.Info(ctx, msg, args...)
-	}
-
 	app := web.NewApp(
-		logger,
+		cfg.Log.Info,
 		cfg.Tracer,
 		mid.Otel(cfg.Tracer),
 		mid.Logger(cfg.Log),
@@ -103,9 +112,11 @@ func WebAPI(cfg Config, routeAdder RouteAdder, options ...func(opts *Options)) h
 	routeAdder.Add(app, cfg)
 
 	for _, site := range opts.sites {
-		if site.react {
+		switch site.react {
+		case true:
 			app.FileServerReact(site.static, site.staticDir, site.staticPath)
-		} else {
+
+		default:
 			app.FileServer(site.static, site.staticDir, site.staticPath)
 		}
 	}

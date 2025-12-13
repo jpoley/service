@@ -6,6 +6,7 @@ package bundle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -71,7 +72,7 @@ func LoadWasmResolversFromStore(ctx context.Context, store storage.Store, txn st
 	var resolvers []*wasm.Resolver
 	if len(resolversToLoad) > 0 {
 		// Get a full snapshot of the current data (including any from "outside" the bundles)
-		data, err := store.Read(ctx, txn, storage.Path{})
+		data, err := store.Read(ctx, txn, storage.RootPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize wasm runtime: %s", err)
 		}
@@ -97,7 +98,7 @@ func LoadBundleFromDiskForRegoVersion(regoVersion ast.RegoVersion, path, name st
 
 	_, err := os.Stat(bundlePath)
 	if err == nil {
-		f, err := os.Open(filepath.Join(bundlePath))
+		f, err := os.Open(bundlePath)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +133,7 @@ func SaveBundleToDisk(path string, raw io.Reader) (string, error) {
 	}
 
 	if raw == nil {
-		return "", fmt.Errorf("no raw bundle bytes to persist to disk")
+		return "", errors.New("no raw bundle bytes to persist to disk")
 	}
 
 	dest, err := os.CreateTemp(path, ".bundle.tar.gz.*.tmp")

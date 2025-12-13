@@ -16,13 +16,13 @@ func TestGenerateNewProducts(n int, userID uuid.UUID) []NewProduct {
 	newPrds := make([]NewProduct, n)
 
 	idx := rand.Intn(10000)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		idx++
 
 		np := NewProduct{
 			Name:     name.MustParse(fmt.Sprintf("Name%d", idx)),
-			Cost:     money.MustParse(float64(rand.Intn(500))),
-			Quantity: quantity.MustParse(rand.Intn(50)),
+			Cost:     money.MustParse(float64(rand.Intn(500) + 1)),
+			Quantity: quantity.MustParse(rand.Intn(50) + 1),
 			UserID:   userID,
 		}
 
@@ -33,7 +33,7 @@ func TestGenerateNewProducts(n int, userID uuid.UUID) []NewProduct {
 }
 
 // TestGenerateSeedProducts is a helper method for testing.
-func TestGenerateSeedProducts(ctx context.Context, n int, api *Business, userID uuid.UUID) ([]Product, error) {
+func TestGenerateSeedProducts(ctx context.Context, n int, api ExtBusiness, userID uuid.UUID) ([]Product, error) {
 	newPrds := TestGenerateNewProducts(n, userID)
 
 	prds := make([]Product, len(newPrds))

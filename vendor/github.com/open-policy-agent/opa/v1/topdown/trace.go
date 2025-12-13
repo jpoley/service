@@ -170,6 +170,7 @@ func (evt *Event) equalNodes(other *Event) bool {
 }
 
 // Tracer defines the interface for tracing in the top-down evaluation engine.
+//
 // Deprecated: Use QueryTracer instead.
 type Tracer interface {
 	Enabled() bool
@@ -199,7 +200,7 @@ func (l *legacyTracer) Enabled() bool {
 	return l.t.Enabled()
 }
 
-func (l *legacyTracer) Config() TraceConfig {
+func (*legacyTracer) Config() TraceConfig {
 	return TraceConfig{
 		PlugLocalVars: true, // For backwards compatibility old tracers will plug local variables
 	}
@@ -230,6 +231,7 @@ func (b *BufferTracer) Enabled() bool {
 }
 
 // Trace adds the event to the buffer.
+//
 // Deprecated: Use TraceEvent instead.
 func (b *BufferTracer) Trace(evt *Event) {
 	*b = append(*b, evt)
@@ -241,7 +243,7 @@ func (b *BufferTracer) TraceEvent(evt Event) {
 }
 
 // Config returns the Tracers standard configuration
-func (b *BufferTracer) Config() TraceConfig {
+func (*BufferTracer) Config() TraceConfig {
 	return TraceConfig{PlugLocalVars: true}
 }
 
@@ -373,10 +375,6 @@ func exprLocalVars(e *Event) *ast.ValueMap {
 	vars := ast.NewValueMap()
 
 	findVars := func(term *ast.Term) bool {
-		//if r, ok := term.Value.(ast.Ref); ok {
-		//	fmt.Printf("ref: %v\n", r)
-		//	//return true
-		//}
 		if name, ok := term.Value.(ast.Var); ok {
 			if meta, ok := e.LocalMetadata[name]; ok {
 				if val := e.Locals.Get(name); val != nil {
@@ -411,7 +409,7 @@ func formatEvent(event *Event, depth int) string {
 		return fmt.Sprintf("%v%v %q", padding, event.Op, event.Message)
 	}
 
-	var details interface{}
+	var details any
 	if node, ok := event.Node.(*ast.Rule); ok {
 		details = node.Path()
 	} else if event.Ref != nil {
@@ -421,7 +419,7 @@ func formatEvent(event *Event, depth int) string {
 	}
 
 	template := "%v%v %v"
-	opts := []interface{}{padding, event.Op, details}
+	opts := []any{padding, event.Op, details}
 
 	if event.Message != "" {
 		template += " %v"
@@ -537,7 +535,7 @@ func builtinTrace(bctx BuiltinContext, operands []*ast.Term, iter func(*ast.Term
 	}
 
 	if !bctx.TraceEnabled {
-		return iter(ast.InternedBooleanTerm(true))
+		return iter(ast.InternedTerm(true))
 	}
 
 	evt := Event{
@@ -552,7 +550,7 @@ func builtinTrace(bctx BuiltinContext, operands []*ast.Term, iter func(*ast.Term
 		bctx.QueryTracers[i].TraceEvent(evt)
 	}
 
-	return iter(ast.InternedBooleanTerm(true))
+	return iter(ast.InternedTerm(true))
 }
 
 func rewrite(event *Event) *Event {
@@ -644,9 +642,9 @@ type PrettyEventOpts struct {
 	PrettyVars bool
 }
 
-func walkTestTerms(x interface{}, f func(*ast.Term) bool) {
+func walkTestTerms(x any, f func(*ast.Term) bool) {
 	var vis *ast.GenericVisitor
-	vis = ast.NewGenericVisitor(func(x interface{}) bool {
+	vis = ast.NewGenericVisitor(func(x any) bool {
 		switch x := x.(type) {
 		case ast.Call:
 			for _, t := range x[1:] {
@@ -789,7 +787,7 @@ func PrettyEvent(w io.Writer, e *Event, opts PrettyEventOpts) error {
 
 func printPrettyVars(w *bytes.Buffer, exprVars map[string]varInfo) {
 	containsTabs := false
-	varRows := make(map[int]interface{})
+	varRows := make(map[int]any)
 	for _, info := range exprVars {
 		if len(info.exprLoc.Tabs) > 0 {
 			containsTabs = true
@@ -810,7 +808,7 @@ func printPrettyVars(w *bytes.Buffer, exprVars map[string]varInfo) {
 
 		w.WriteString("\n\nWhere:\n")
 		for _, info := range byName {
-			w.WriteString(fmt.Sprintf("\n%s: %s", info.Title(), iStrs.Truncate(info.Value(), maxPrettyExprVarWidth)))
+			fmt.Fprintf(w, "\n%s: %s", info.Title(), iStrs.Truncate(info.Value(), maxPrettyExprVarWidth))
 		}
 
 		return
@@ -867,14 +865,11 @@ func printArrows(w *bytes.Buffer, l []varInfo, printValueAt int) {
 			spaces = (col - prevCol) - 1
 		}
 
-		for j := 0; j < spaces; j++ {
+		for j := range spaces {
 			tab := false
-			for _, t := range info.exprLoc.Tabs {
-				if t == j+prevCol+1 {
-					w.WriteString("\t")
-					tab = true
-					break
-				}
+			if slices.Contains(info.exprLoc.Tabs, j+prevCol+1) {
+				w.WriteString("\t")
+				tab = true
 			}
 			if !tab {
 				w.WriteString(" ")
@@ -885,7 +880,7 @@ func printArrows(w *bytes.Buffer, l []varInfo, printValueAt int) {
 			valueStr := iStrs.Truncate(info.Value(), maxPrettyExprVarWidth)
 			if (i > 0 && col == l[i-1].col) || (i < len(l)-1 && col == l[i+1].col) {
 				// There is another var on this column, so we need to include the name to differentiate them.
-				w.WriteString(fmt.Sprintf("%s: %s", info.Title(), valueStr))
+				fmt.Fprintf(w, "%s: %s", info.Title(), valueStr)
 			} else {
 				w.WriteString(valueStr)
 			}

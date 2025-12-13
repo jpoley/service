@@ -21,7 +21,7 @@ func BeginCommitRollback(log *logger.Logger, bgn sqldb.Beginner) web.MidFunc {
 			log.Info(ctx, "BEGIN TRANSACTION")
 			tx, err := bgn.Begin()
 			if err != nil {
-				return errs.Newf(errs.Internal, "BEGIN TRANSACTION: %s", err)
+				return errs.Errorf(errs.Internal, "BEGIN TRANSACTION: %s", err)
 			}
 
 			defer func() {
@@ -41,13 +41,13 @@ func BeginCommitRollback(log *logger.Logger, bgn sqldb.Beginner) web.MidFunc {
 
 			resp := next(ctx, r)
 
-			if isError(resp) != nil {
+			if checkIsError(resp) != nil {
 				return resp
 			}
 
 			log.Info(ctx, "COMMIT TRANSACTION")
 			if err := tx.Commit(); err != nil {
-				return errs.Newf(errs.Internal, "COMMIT TRANSACTION: %s", err)
+				return errs.Errorf(errs.Internal, "COMMIT TRANSACTION: %s", err)
 			}
 
 			hasCommitted = true

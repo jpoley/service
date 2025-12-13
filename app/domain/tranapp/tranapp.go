@@ -14,11 +14,11 @@ import (
 )
 
 type app struct {
-	userBus    *userbus.Business
-	productBus *productbus.Business
+	userBus    userbus.ExtBusiness
+	productBus productbus.ExtBusiness
 }
 
-func newApp(userBus *userbus.Business, productBus *productbus.Business) *app {
+func newApp(userBus userbus.ExtBusiness, productBus productbus.ExtBusiness) *app {
 	return &app{
 		userBus:    userBus,
 		productBus: productBus,
@@ -72,19 +72,19 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
-	usr, err := a.userBus.Create(ctx, nu)
+	usr, err := a.userBus.Create(ctx, mid.GetSubjectID(ctx), nu)
 	if err != nil {
 		if errors.Is(err, userbus.ErrUniqueEmail) {
 			return errs.New(errs.Aborted, userbus.ErrUniqueEmail)
 		}
-		return errs.Newf(errs.Internal, "create: usr[%+v]: %s", usr, err)
+		return errs.Errorf(errs.Internal, "create: usr[%+v]: %s", usr, err)
 	}
 
 	np.UserID = usr.ID
 
 	prd, err := a.productBus.Create(ctx, np)
 	if err != nil {
-		return errs.Newf(errs.Internal, "create: prd[%+v]: %s", prd, err)
+		return errs.Errorf(errs.Internal, "create: prd[%+v]: %s", prd, err)
 	}
 
 	return toAppProduct(prd)

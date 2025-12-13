@@ -46,6 +46,7 @@ type Query struct {
 	instr                       *Instrumentation
 	disableInlining             []ast.Ref
 	shallowInlining             bool
+	nondeterministicBuiltins    bool
 	genvarprefix                string
 	runtime                     *ast.Term
 	builtins                    map[string]*Builtin
@@ -61,6 +62,7 @@ type Query struct {
 	printHook                   print.Hook
 	tracingOpts                 tracing.Options
 	virtualCache                VirtualCache
+	baseCache                   BaseCache
 }
 
 // Builtin represents a built-in function that queries can call.
@@ -76,7 +78,6 @@ func NewQuery(query ast.Body) *Query {
 		genvarprefix: ast.WildcardPrefix,
 		indexing:     true,
 		earlyExit:    true,
-		external:     newResolverTrie(),
 	}
 }
 
@@ -120,6 +121,7 @@ func (q *Query) WithInput(input *ast.Term) *Query {
 }
 
 // WithTracer adds a query tracer to use during evaluation. This is optional.
+//
 // Deprecated: Use WithQueryTracer instead.
 func (q *Query) WithTracer(tracer Tracer) *Query {
 	qt, ok := tracer.(QueryTracer)
@@ -276,6 +278,9 @@ func (q *Query) WithBuiltinErrorList(list *[]Error) *Query {
 
 // WithResolver configures an external resolver to use for the given ref.
 func (q *Query) WithResolver(ref ast.Ref, r resolver.Resolver) *Query {
+	if q.external == nil {
+		q.external = newResolverTrie()
+	}
 	q.external.Put(ref, r)
 	return q
 }
@@ -313,6 +318,21 @@ func (q *Query) WithVirtualCache(vc VirtualCache) *Query {
 	return q
 }
 
+// WithBaseCache sets the BaseCache to use during evaluation. This is
+// optional, and if not set, the default cache is used.
+func (q *Query) WithBaseCache(bc BaseCache) *Query {
+	q.baseCache = bc
+	return q
+}
+
+// WithNondeterministicBuiltins causes non-deterministic builtins to be evalued
+// during partial evaluation. This is needed to pull in external data, or validate
+// a JWT, during PE, so that the result informs what queries are returned.
+func (q *Query) WithNondeterministicBuiltins(yes bool) *Query {
+	q.nondeterministicBuiltins = yes
+	return q
+}
+
 // PartialRun executes partial evaluation on the query with respect to unknown
 // values. Partial evaluation attempts to evaluate as much of the query as
 // possible without requiring values for the unknowns set on the query. The
@@ -327,7 +347,7 @@ func (q *Query) PartialRun(ctx context.Context) (partials []ast.Body, support []
 	if q.seed == nil {
 		q.seed = rand.Reader
 	}
-	if !q.time.IsZero() {
+	if q.time.IsZero() {
 		q.time = time.Now()
 	}
 	if q.metrics == nil {
@@ -344,11 +364,18 @@ func (q *Query) PartialRun(ctx context.Context) (partials []ast.Body, support []
 		vc = NewVirtualCache()
 	}
 
+	var bc BaseCache
+	if q.baseCache != nil {
+		bc = q.baseCache
+	} else {
+		bc = newBaseCache()
+	}
+
 	e := &eval{
 		ctx:                         ctx,
 		metrics:                     q.metrics,
 		seed:                        q.seed,
-		time:                        ast.NumberTerm(int64ToJSONNumber(q.time.UnixNano())),
+		timeStart:                   q.time.UnixNano(),
 		cancel:                      q.cancel,
 		query:                       q.query,
 		queryCompiler:               q.queryCompiler,
@@ -357,8 +384,7 @@ func (q *Query) PartialRun(ctx context.Context) (partials []ast.Body, support []
 		bindings:                    b,
 		compiler:                    q.compiler,
 		store:                       q.store,
-		baseCache:                   newBaseCache(),
-		targetStack:                 newRefStack(),
+		baseCache:                   bc,
 		txn:                         q.txn,
 		input:                       q.input,
 		external:                    q.external,
@@ -368,19 +394,18 @@ func (q *Query) PartialRun(ctx context.Context) (partials []ast.Body, support []
 		instr:                       q.instr,
 		builtins:                    q.builtins,
 		builtinCache:                builtins.Cache{},
-		functionMocks:               newFunctionMocksStack(),
 		interQueryBuiltinCache:      q.interQueryBuiltinCache,
 		interQueryBuiltinValueCache: q.interQueryBuiltinValueCache,
 		ndBuiltinCache:              q.ndBuiltinCache,
 		virtualCache:                vc,
-		comprehensionCache:          newComprehensionCache(),
 		saveSet:                     newSaveSet(q.unknowns, b, q.instr),
 		saveStack:                   newSaveStack(),
 		saveSupport:                 newSaveSupport(),
-		saveNamespace:               ast.StringTerm(q.partialNamespace),
+		saveNamespace:               ast.InternedTerm(q.partialNamespace),
 		skipSaveNamespace:           q.skipSaveNamespace,
 		inliningControl: &inliningControl{
-			shallow: q.shallowInlining,
+			shallow:                  q.shallowInlining,
+			nondeterministicBuiltins: q.nondeterministicBuiltins,
 		},
 		genvarprefix:  q.genvarprefix,
 		runtime:       q.runtime,
@@ -534,11 +559,18 @@ func (q *Query) Iter(ctx context.Context, iter func(QueryResult) error) error {
 		vc = NewVirtualCache()
 	}
 
+	var bc BaseCache
+	if q.baseCache != nil {
+		bc = q.baseCache
+	} else {
+		bc = newBaseCache()
+	}
+
 	e := &eval{
 		ctx:                         ctx,
 		metrics:                     q.metrics,
 		seed:                        q.seed,
-		time:                        ast.NumberTerm(int64ToJSONNumber(q.time.UnixNano())),
+		timeStart:                   q.time.UnixNano(),
 		cancel:                      q.cancel,
 		query:                       q.query,
 		queryCompiler:               q.queryCompiler,
@@ -547,8 +579,7 @@ func (q *Query) Iter(ctx context.Context, iter func(QueryResult) error) error {
 		bindings:                    newBindings(0, q.instr),
 		compiler:                    q.compiler,
 		store:                       q.store,
-		baseCache:                   newBaseCache(),
-		targetStack:                 newRefStack(),
+		baseCache:                   bc,
 		txn:                         q.txn,
 		input:                       q.input,
 		external:                    q.external,
@@ -558,12 +589,10 @@ func (q *Query) Iter(ctx context.Context, iter func(QueryResult) error) error {
 		instr:                       q.instr,
 		builtins:                    q.builtins,
 		builtinCache:                builtins.Cache{},
-		functionMocks:               newFunctionMocksStack(),
 		interQueryBuiltinCache:      q.interQueryBuiltinCache,
 		interQueryBuiltinValueCache: q.interQueryBuiltinValueCache,
 		ndBuiltinCache:              q.ndBuiltinCache,
 		virtualCache:                vc,
-		comprehensionCache:          newComprehensionCache(),
 		genvarprefix:                q.genvarprefix,
 		runtime:                     q.runtime,
 		indexing:                    q.indexing,

@@ -18,9 +18,6 @@ type Location struct {
 	Col    int    `json:"col"`  // The column in the row.
 	Offset int    `json:"-"`    // The byte offset for the location in the source.
 
-	// JSONOptions specifies options for marshaling and unmarshalling of locations
-	JSONOptions astJSON.Options
-
 	Tabs []int `json:"-"` // The column offsets of tabs in the source.
 }
 
@@ -39,18 +36,18 @@ func (loc *Location) Equal(other *Location) bool {
 
 // Errorf returns a new error value with a message formatted to include the location
 // info (e.g., line, column, filename, etc.)
-func (loc *Location) Errorf(f string, a ...interface{}) error {
+func (loc *Location) Errorf(f string, a ...any) error {
 	return errors.New(loc.Format(f, a...))
 }
 
 // Wrapf returns a new error value that wraps an existing error with a message formatted
 // to include the location info (e.g., line, column, filename, etc.)
-func (loc *Location) Wrapf(err error, f string, a ...interface{}) error {
+func (loc *Location) Wrapf(err error, f string, a ...any) error {
 	return fmt.Errorf(loc.Format(f, a...)+": %w", err)
 }
 
 // Format returns a formatted string prefixed with the location information.
-func (loc *Location) Format(f string, a ...interface{}) string {
+func (loc *Location) Format(f string, a ...any) string {
 	if len(loc.File) > 0 {
 		f = fmt.Sprintf("%v:%v: %v", loc.File, loc.Row, f)
 	} else {
@@ -98,7 +95,8 @@ func (loc *Location) Compare(other *Location) int {
 
 func (loc *Location) MarshalJSON() ([]byte, error) {
 	// structs are used here to preserve the field ordering of the original Location struct
-	if loc.JSONOptions.MarshalOptions.ExcludeLocationFile {
+	jsonOptions := astJSON.GetOptions().MarshalOptions
+	if jsonOptions.ExcludeLocationFile {
 		data := struct {
 			Row  int    `json:"row"`
 			Col  int    `json:"col"`
@@ -108,7 +106,7 @@ func (loc *Location) MarshalJSON() ([]byte, error) {
 			Col: loc.Col,
 		}
 
-		if loc.JSONOptions.MarshalOptions.IncludeLocationText {
+		if jsonOptions.IncludeLocationText {
 			data.Text = loc.Text
 		}
 
@@ -126,7 +124,7 @@ func (loc *Location) MarshalJSON() ([]byte, error) {
 		File: loc.File,
 	}
 
-	if loc.JSONOptions.MarshalOptions.IncludeLocationText {
+	if jsonOptions.IncludeLocationText {
 		data.Text = loc.Text
 	}
 

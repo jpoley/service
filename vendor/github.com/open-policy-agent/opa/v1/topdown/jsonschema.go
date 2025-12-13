@@ -29,7 +29,7 @@ func astValueToJSONSchemaLoader(value ast.Value) (gojsonschema.JSONLoader, error
 		loader = gojsonschema.NewStringLoader(string(x))
 	case ast.Object:
 		// In case of object serialize it to JSON representation.
-		var data interface{}
+		var data any
 		data, err = ast.JSON(value)
 		if err != nil {
 			return nil, err
@@ -44,7 +44,7 @@ func astValueToJSONSchemaLoader(value ast.Value) (gojsonschema.JSONLoader, error
 }
 
 func newResultTerm(valid bool, data *ast.Term) *ast.Term {
-	return ast.ArrayTerm(ast.InternedBooleanTerm(valid), data)
+	return ast.ArrayTerm(ast.InternedTerm(valid), data)
 }
 
 // builtinJSONSchemaVerify accepts 1 argument which can be string or object and checks if it is valid JSON schema.
@@ -61,7 +61,7 @@ func builtinJSONSchemaVerify(_ BuiltinContext, operands []*ast.Term, iter func(*
 		return iter(newResultTerm(false, ast.StringTerm("jsonschema: "+err.Error())))
 	}
 
-	return iter(newResultTerm(true, ast.NullTerm()))
+	return iter(newResultTerm(true, ast.InternedNullTerm))
 }
 
 // builtinJSONMatchSchema accepts 2 arguments both can be string or object and verifies if the document matches the JSON schema.

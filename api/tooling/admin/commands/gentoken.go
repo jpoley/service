@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -53,20 +54,17 @@ func GenToken(log *logger.Logger, dbConfig sqldb.Config, keyPath string, userID 
 	}
 
 	if n1+n2 == 0 {
-		return fmt.Errorf("no keys exist: %w", err)
+		return errors.New("no keys exist")
 	}
 
 	authCfg := auth.Config{
 		Log:       log,
-		DB:        db,
+		UserBus:   userBus,
 		KeyLookup: ks,
 		Issuer:    "service project",
 	}
 
-	ath, err := auth.New(authCfg)
-	if err != nil {
-		return fmt.Errorf("constructing auth: %w", err)
-	}
+	ath := auth.New(authCfg)
 
 	// Generating a token requires defining a set of claims. In this applications
 	// case, we only care about defining the subject and the user in question and
